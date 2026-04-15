@@ -1,0 +1,10 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+# All routes go to index.html (React handles routing via URL parsing)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

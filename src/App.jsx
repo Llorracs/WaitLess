@@ -30,7 +30,6 @@ import {
   markOrderReady,
   markOrderPickedUp,
 } from "./lib/barOrderService";
-import AdminView from "./AdminView";
 import LandingPage from "./LandingPage";
 import AgeVerification, { isAgeVerified } from "./AgeVerification";
 

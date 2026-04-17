@@ -18,6 +18,8 @@
 
 import { useState, useEffect } from "react";
 import { supabase } from "./lib/barOrderService";
+import QRGenerator from "./QRGenerator";
+import AnalyticsView from "./AnalyticsView";
 
 export default function AdminView({ venue: initialVenue, BRAND }) {
   const [user, setUser] = useState(null);
@@ -29,7 +31,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
 
   const [venue, setVenue] = useState(initialVenue);
   const [menu, setMenu] = useState([]);
-  const [activeTab, setActiveTab] = useState("menu"); // menu | settings | square
+  const [activeTab, setActiveTab] = useState("analytics"); // analytics | menu | settings | square | qr
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
 
@@ -181,9 +183,11 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
       {/* Tab nav */}
       <div style={S.tabBar}>
         {[
+          { key: "analytics", label: "Analytics" },
           { key: "menu", label: "Menu" },
           { key: "settings", label: "Settings" },
           { key: "square", label: "Payments" },
+          { key: "qr", label: "QR Code" },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -197,6 +201,9 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
 
       {/* Content */}
       <div style={S.content}>
+        {activeTab === "analytics" && (
+          <AnalyticsView venue={venue} BRAND={BRAND} />
+        )}
         {activeTab === "menu" && (
           <MenuBuilder venue={venue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} />
         )}
@@ -205,6 +212,9 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
         )}
         {activeTab === "square" && (
           <SquareSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
+        )}
+        {activeTab === "qr" && (
+          <QRGenerator venue={venue} BRAND={BRAND} embedded={true} />
         )}
       </div>
 
@@ -544,8 +554,71 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     square_location_id: venue.square_location_id || "",
     square_environment: venue.square_environment || "sandbox",
   });
+  const [showManual, setShowManual] = useState(false);
 
-  const handleSave = async () => {
+  // Check for OAuth callback result
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("square") === "connected") {
+      showSaved("Square connected successfully!");
+      // Reload venue data to get new credentials
+      async function reload() {
+        const { data } = await supabase
+          .from("venues")
+          .select("*")
+          .eq("id", venue.id)
+          .single();
+        if (data) {
+          setVenue(data);
+          setForm({
+            square_app_id: data.square_app_id || "",
+            square_access_token: data.square_access_token || "",
+            square_location_id: data.square_location_id || "",
+            square_environment: data.square_environment || "sandbox",
+          });
+        }
+      }
+      reload();
+      // Clean URL
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (urlParams.get("error")) {
+      alert("Square connection failed: " + urlParams.get("error"));
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  const handleOAuthConnect = () => {
+    const appId = "sq0idp-U-HGTJSyL66_0cvWAb1OkQ";
+    const redirectUri = encodeURIComponent(`${window.location.origin}/.netlify/functions/square-oauth-callback`);
+    const scope = encodeURIComponent("MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_READ ORDERS_WRITE ORDERS_READ ITEMS_READ ITEMS_WRITE");
+    const state = venue.id; // Pass venue ID so callback knows which venue to update
+
+    const authUrl = `https://connect.squareup.com/oauth2/authorize?client_id=${appId}&scope=${scope}&session=false&state=${state}&redirect_uri=${redirectUri}`;
+    window.location.href = authUrl;
+  };
+
+  const handleDisconnect = async () => {
+    if (!confirm("Disconnect Square? This will disable live payments and switch to demo mode.")) return;
+
+    const { error } = await supabase
+      .from("venues")
+      .update({
+        square_app_id: null,
+        square_access_token: null,
+        square_location_id: null,
+        square_environment: "sandbox",
+      })
+      .eq("id", venue.id);
+
+    if (!error) {
+      setForm({ square_app_id: "", square_access_token: "", square_location_id: "", square_environment: "sandbox" });
+      setVenue((prev) => ({ ...prev, square_app_id: null, square_access_token: null, square_location_id: null, square_environment: "sandbox" }));
+      showSaved("Square disconnected");
+    }
+  };
+
+  const handleManualSave = async () => {
     const { error } = await supabase
       .from("venues")
       .update({
@@ -562,44 +635,88 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     }
   };
 
-  const isConfigured = form.square_app_id && form.square_access_token && form.square_location_id;
+  const isConfigured = venue.square_app_id && venue.square_access_token && venue.square_location_id;
 
   return (
     <div style={S.settingsGrid}>
+      {/* Status badge */}
       <div style={{ padding: "16px", borderRadius: 10, background: isConfigured ? "#2ecc7115" : "#d4a84315", border: `1px solid ${isConfigured ? "#2ecc7133" : "#d4a84333"}`, marginBottom: 8 }}>
         <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: isConfigured ? "#2ecc71" : "#d4a843", letterSpacing: 2 }}>
-          {isConfigured ? "✓ SQUARE CONNECTED" : "⚠ SQUARE NOT CONFIGURED — RUNNING IN DEMO MODE"}
+          {isConfigured ? "✓ SQUARE CONNECTED — LIVE PAYMENTS ACTIVE" : "⚠ SQUARE NOT CONFIGURED — RUNNING IN DEMO MODE"}
         </span>
       </div>
 
-      <div style={S.settingsField}>
-        <label style={S.label}>Square Application ID</label>
-        <input type="text" value={form.square_app_id} onChange={(e) => setForm({ ...form, square_app_id: e.target.value })} style={S.input} placeholder="sq0idp-..." />
-      </div>
+      {isConfigured ? (
+        /* Connected state */
+        <>
+          <div style={{ padding: "20px", background: "#141414", borderRadius: 12, border: "1px solid #222", display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 1 }}>Square Payments</div>
+                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#2ecc71", letterSpacing: 1, marginTop: 4 }}>CONNECTED · {venue.square_environment?.toUpperCase()}</div>
+              </div>
+              <div style={{ width: 40, height: 40, borderRadius: 8, background: "#2ecc7122", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>✓</div>
+            </div>
+            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+              Location: {venue.square_location_id}
+            </div>
+          </div>
+          <button onClick={handleDisconnect} style={{ ...S.smallBtnDim, alignSelf: "flex-start" }}>
+            DISCONNECT SQUARE
+          </button>
+        </>
+      ) : (
+        /* Not connected state */
+        <>
+          {/* OAuth button — the easy way */}
+          <div style={{ padding: "24px", background: "#141414", borderRadius: 14, border: "1px solid #222", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
+            <div style={{ fontSize: 36 }}>💳</div>
+            <h3 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, letterSpacing: 2, margin: 0 }}>Connect Square</h3>
+            <p style={{ fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6, margin: 0 }}>
+              Click below to securely connect your Square account. You'll be redirected to Square to authorize Waitless, then sent right back.
+            </p>
+            <button onClick={handleOAuthConnect} style={S.saveBtn}>
+              🔗 CONNECT SQUARE ACCOUNT
+            </button>
+            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 1, margin: 0 }}>
+              YOUR CREDENTIALS STAY SECURE · PAYMENTS GO DIRECTLY TO YOUR BANK
+            </p>
+          </div>
 
-      <div style={S.settingsField}>
-        <label style={S.label}>Square Access Token</label>
-        <input type="password" value={form.square_access_token} onChange={(e) => setForm({ ...form, square_access_token: e.target.value })} style={S.input} placeholder="EAAAl..." />
-      </div>
+          {/* Manual entry fallback */}
+          <button onClick={() => setShowManual(!showManual)} style={{ ...S.smallBtnDim, alignSelf: "center", marginTop: 8 }}>
+            {showManual ? "HIDE MANUAL SETUP" : "OR ENTER CREDENTIALS MANUALLY"}
+          </button>
 
-      <div style={S.settingsField}>
-        <label style={S.label}>Square Location ID</label>
-        <input type="text" value={form.square_location_id} onChange={(e) => setForm({ ...form, square_location_id: e.target.value })} style={S.input} placeholder="L..." />
-      </div>
-
-      <div style={S.settingsField}>
-        <label style={S.label}>Environment</label>
-        <select value={form.square_environment} onChange={(e) => setForm({ ...form, square_environment: e.target.value })} style={S.select}>
-          <option value="sandbox">Sandbox (Testing)</option>
-          <option value="production">Production (Live)</option>
-        </select>
-      </div>
-
-      <p style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-        Find your credentials at <a href="https://developer.squareup.com" target="_blank" rel="noopener noreferrer" style={{ color: "#d4a843" }}>developer.squareup.com</a> under your application's credentials page.
-      </p>
-
-      <button onClick={handleSave} style={S.saveBtn}>SAVE PAYMENT SETTINGS</button>
+          {showManual && (
+            <div style={{ padding: "20px", background: "#0a0a0a", borderRadius: 12, border: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={S.settingsField}>
+                <label style={S.label}>Square Application ID</label>
+                <input type="text" value={form.square_app_id} onChange={(e) => setForm({ ...form, square_app_id: e.target.value })} style={S.input} placeholder="sq0idp-..." />
+              </div>
+              <div style={S.settingsField}>
+                <label style={S.label}>Square Access Token</label>
+                <input type="password" value={form.square_access_token} onChange={(e) => setForm({ ...form, square_access_token: e.target.value })} style={S.input} placeholder="EAAAl..." />
+              </div>
+              <div style={S.settingsField}>
+                <label style={S.label}>Square Location ID</label>
+                <input type="text" value={form.square_location_id} onChange={(e) => setForm({ ...form, square_location_id: e.target.value })} style={S.input} placeholder="L..." />
+              </div>
+              <div style={S.settingsField}>
+                <label style={S.label}>Environment</label>
+                <select value={form.square_environment} onChange={(e) => setForm({ ...form, square_environment: e.target.value })} style={S.select}>
+                  <option value="sandbox">Sandbox (Testing)</option>
+                  <option value="production">Production (Live)</option>
+                </select>
+              </div>
+              <p style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>
+                Find your credentials at <a href="https://developer.squareup.com" target="_blank" rel="noopener noreferrer" style={{ color: "#d4a843" }}>developer.squareup.com</a>
+              </p>
+              <button onClick={handleManualSave} style={S.saveBtn}>SAVE PAYMENT SETTINGS</button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

@@ -29,12 +29,14 @@ import {
   startMakingOrder,
   markOrderReady,
   markOrderPickedUp,
+  supabase,
 } from "./lib/barOrderService";
 import AgeVerification, { isAgeVerified } from "./AgeVerification";
 import LandingPage from "./LandingPage";
 import QRGenerator from "./QRGenerator";
 import AdminView from "./AdminView";
 import OnboardingView from "./OnboardingView";
+import MasterAdmin from "./MasterAdmin";
 
 // ============================================
 // URL PARSING
@@ -47,7 +49,9 @@ function getRouteFromUrl() {
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
   const isSignup = parts[0] === "admin" && parts[1] === "signup";
-  return { slug, isBartender, isQR, isAdmin, isSignup };
+  const isMasterAdmin = parts[0] === "admin" && parts[1] === "master";
+  const isOAuthComplete = parts[0] === "oauth-complete";
+  return { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete };
 }
 
 // ============================================
@@ -211,11 +215,50 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
-  const { slug, isBartender, isQR, isAdmin, isSignup } = getRouteFromUrl();
+  const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete } = getRouteFromUrl();
 
   // Signup page — no venue needed
   if (isSignup) {
     return <OnboardingView BRAND={getBrand(null)} />;
+  }
+
+  // Master admin — platform owner panel
+  if (isMasterAdmin) {
+    return <MasterAdmin />;
+  }
+
+  // OAuth complete — redirect to the venue's admin page with query params
+  if (isOAuthComplete) {
+    const urlParams = new URLSearchParams(window.location.search);
+    const venueId = urlParams.get("venue_id");
+    const squareStatus = urlParams.get("square");
+    const oauthError = urlParams.get("error");
+
+    // Look up the venue slug from ID, then redirect
+    useEffect(() => {
+      async function redirectToAdmin() {
+        if (venueId) {
+          const { data } = await supabase
+            .from("venues")
+            .select("slug")
+            .eq("id", venueId)
+            .single();
+          if (data?.slug) {
+            const params = squareStatus ? `?square=${squareStatus}` : oauthError ? `?error=${oauthError}` : "";
+            window.location.href = `/${data.slug}/admin${params}`;
+            return;
+          }
+        }
+        window.location.href = "/";
+      }
+      redirectToAdmin();
+    }, []);
+
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
+        <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", letterSpacing: 2 }}>CONNECTING SQUARE...</p>
+      </div>
+    );
   }
 
   useEffect(() => {

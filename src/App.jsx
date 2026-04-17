@@ -310,7 +310,7 @@ export default function App() {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
         <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
-        <div style={{ width: 50, height: 50, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#e91e8c", animation: "spin 1s linear infinite" }} />
+        <div style={{ width: 50, height: 50, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite" }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", marginTop: 16, letterSpacing: 2 }}>LOADING VENUE...</p>
       </div>
@@ -321,7 +321,7 @@ export default function App() {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", padding: 24, textAlign: "center" }}>
         <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
-        <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, marginBottom: 16, background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>WAITLESS</h1>
+        <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, marginBottom: 16, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>WAITLESS</h1>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: "#888", maxWidth: 400 }}>{error}</p>
       </div>
     );

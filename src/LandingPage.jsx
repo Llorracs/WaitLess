@@ -333,6 +333,10 @@ export default function LandingPage() {
         <span style={S.footerLogo}>WAITLESS</span>
         <span style={S.footerTag}>Weightless service, zero wait.</span>
         <span style={S.footerCopy}>© {new Date().getFullYear()} Waitless. All rights reserved.</span>
+        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
+          <a href="/privacy" style={{ fontSize: 11, color: "#444", textDecoration: "none", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>Privacy Policy</a>
+          <a href="/terms" style={{ fontSize: 11, color: "#444", textDecoration: "none", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>Terms of Service</a>
+        </div>
       </footer>
     </div>
   );

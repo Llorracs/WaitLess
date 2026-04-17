@@ -38,6 +38,7 @@ import AdminView from "./AdminView";
 import OnboardingView from "./OnboardingView";
 import MasterAdmin from "./MasterAdmin";
 import InstallPrompt from "./InstallPrompt";
+import { PrivacyPolicy, TermsOfService } from "./LegalPages";
 
 // ============================================
 // URL PARSING
@@ -52,7 +53,9 @@ function getRouteFromUrl() {
   const isSignup = parts[0] === "admin" && parts[1] === "signup";
   const isMasterAdmin = parts[0] === "admin" && parts[1] === "master";
   const isOAuthComplete = parts[0] === "oauth-complete";
-  return { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete };
+  const isPrivacy = parts[0] === "privacy";
+  const isTerms = parts[0] === "terms";
+  return { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
 }
 
 // ============================================
@@ -216,7 +219,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
-  const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete } = getRouteFromUrl();
+  const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+
+  // Legal pages — no venue needed
+  if (isPrivacy) return <PrivacyPolicy />;
+  if (isTerms) return <TermsOfService />;
 
   // Signup page — no venue needed
   if (isSignup) {

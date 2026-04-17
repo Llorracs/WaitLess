@@ -20,6 +20,7 @@ import { useState, useEffect } from "react";
 import { supabase } from "./lib/barOrderService";
 import QRGenerator from "./QRGenerator";
 import AnalyticsView from "./AnalyticsView";
+import BillingView from "./BillingView";
 
 export default function AdminView({ venue: initialVenue, BRAND }) {
   const [user, setUser] = useState(null);
@@ -188,6 +189,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           { key: "settings", label: "Settings" },
           { key: "square", label: "Payments" },
           { key: "qr", label: "QR Code" },
+          { key: "billing", label: "Billing" },
         ].map((tab) => (
           <button
             key={tab.key}
@@ -215,6 +217,9 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
         )}
         {activeTab === "qr" && (
           <QRGenerator venue={venue} BRAND={BRAND} embedded={true} />
+        )}
+        {activeTab === "billing" && (
+          <BillingView venue={venue} BRAND={BRAND} />
         )}
       </div>
 

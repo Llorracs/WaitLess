@@ -249,41 +249,69 @@ export default function LandingPage() {
         style={{ ...S.section, opacity: visible.pricing ? 1 : 0, transform: visible.pricing ? "none" : "translateY(30px)", transition: "all 0.8s ease" }}
       >
         <h2 style={S.sectionTitle}>Simple Pricing</h2>
-        <p style={S.sectionSub}>Start free. Pay when you're making money.</p>
+        <p style={S.sectionSub}>One plan. Everything included. No feature gates, no upsells.</p>
 
         <div style={S.pricingCards}>
           <div className="hover-lift" style={S.pricingCard}>
-            <span style={S.pricingTier}>STARTER</span>
+            <span style={S.pricingTier}>MONTHLY</span>
             <div style={S.pricingPrice}>
-              <span style={S.pricingAmount}>Free</span>
+              <span style={S.pricingCurrency}>$</span>
+              <span style={S.pricingAmount}>199</span>
+              <span style={S.pricingPeriod}>/mo</span>
             </div>
-            <span style={S.pricingPeriod}>14-day trial</span>
+            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>14-day free trial included</span>
             <div style={S.pricingFeatures}>
-              {["Full ordering system", "Bartender queue", "Custom branding", "Menu management", "Demo mode"].map((f) => (
+              {[
+                "Full mobile ordering system",
+                "Real-time bartender queue",
+                "White-label branding",
+                "Menu management dashboard",
+                "Revenue analytics",
+                "Square payment integration",
+                "QR codes & print posters",
+                "Age verification",
+                "Unlimited orders",
+                "We never touch your revenue",
+              ].map((f) => (
                 <div key={f} style={S.pricingFeature}>
                   <span style={S.checkmark}>✓</span> {f}
                 </div>
               ))}
             </div>
-            <a href="#contact" style={S.pricingCta}>START FREE TRIAL</a>
+            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>START FREE TRIAL</a>
           </div>
 
           <div className="hover-lift" style={{ ...S.pricingCard, ...S.pricingFeatured }}>
-            <span style={{ ...S.pricingTier, color: "#e91e8c" }}>PRO</span>
+            <div style={{ position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12, background: "linear-gradient(135deg, #e91e8c, #d4a843)", fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>SAVE $589</div>
+            <span style={{ ...S.pricingTier, color: "#e91e8c" }}>ANNUAL</span>
             <div style={S.pricingPrice}>
               <span style={S.pricingCurrency}>$</span>
-              <span style={S.pricingAmount}>99</span>
-              <span style={S.pricingPeriod}>/mo</span>
+              <span style={S.pricingAmount}>1,799</span>
+              <span style={S.pricingPeriod}>/yr</span>
             </div>
+            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>That's $150/mo — save 25%</span>
             <div style={S.pricingFeatures}>
-              {["Everything in Starter", "Live Square payments", "Revenue analytics", "Priority support", "Unlimited orders"].map((f) => (
+              {[
+                "Everything included",
+                "25% discount",
+                "Locked-in pricing",
+                "Priority support",
+              ].map((f) => (
                 <div key={f} style={S.pricingFeature}>
                   <span style={S.checkmark}>✓</span> {f}
                 </div>
               ))}
             </div>
-            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>GET STARTED</a>
+            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>START FREE TRIAL</a>
           </div>
+        </div>
+
+        {/* ROI callout */}
+        <div style={{ maxWidth: 600, margin: "32px auto 0", padding: "20px 24px", background: "#0a0a0a", borderRadius: 14, border: "1px solid #1a1a1a", textAlign: "center" }}>
+          <p style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, color: "#d4a843", margin: "0 0 8px" }}>THE MATH</p>
+          <p style={{ fontSize: 14, color: "#ccc", lineHeight: 1.8, margin: 0 }}>
+            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#e91e8c" }}>$480+ in additional monthly revenue</strong>. Waitless pays for itself in a single busy weekend.
+          </p>
         </div>
       </section>
 

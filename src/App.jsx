@@ -21,6 +21,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getVenueBySlug,
   getVenueMenu,
+  getMenuItemModifiers,
   verifyBartenderPin,
   generateUniqueConfirmation,
   createBarOrder,
@@ -363,6 +364,11 @@ function PatronView({ venue, menu, BRAND }) {
   const [showCustomTip, setShowCustomTip] = useState(false);
   const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
   const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
+  const [specialInstructions, setSpecialInstructions] = useState(""); // Order-level notes
+
+  // Modifier modal state
+  const [modifierModal, setModifierModal] = useState(null); // { item, modifiers, selectedMods, notes }
+  const [loadingModifiers, setLoadingModifiers] = useState(false);
 
   // Request push notification permission on mount
   useEffect(() => {
@@ -383,23 +389,82 @@ function PatronView({ venue, menu, BRAND }) {
   const currentOrder = activeOrders[activeOrderIndex];
   const anyReady = activeOrders.some((o) => o.status === "ready");
 
-  const addToCart = (item) => {
+  // Handle adding an item — check for modifiers first
+  const handleAddItem = async (item) => {
+    setLoadingModifiers(true);
+    try {
+      const modifiers = await getMenuItemModifiers(item.id);
+      if (modifiers && modifiers.length > 0) {
+        // Item has modifiers — show the modal
+        const selectedMods = {};
+        modifiers.forEach((group) => {
+          const defaultOpt = group.options.find((o) => o.is_default);
+          if (defaultOpt) {
+            selectedMods[group.id] = group.max_selections > 1 ? [defaultOpt.id] : defaultOpt.id;
+          } else {
+            selectedMods[group.id] = group.max_selections > 1 ? [] : null;
+          }
+        });
+        setModifierModal({ item, modifiers, selectedMods, notes: "" });
+      } else {
+        // No modifiers — add directly
+        addToCart(item, [], "");
+      }
+    } catch (err) {
+      // If modifier fetch fails, just add the item plain
+      addToCart(item, [], "");
+    } finally {
+      setLoadingModifiers(false);
+    }
+  };
+
+  // Confirm modifier selections and add to cart
+  const confirmModifierSelection = () => {
+    if (!modifierModal) return;
+    const { item, modifiers, selectedMods, notes } = modifierModal;
+
+    // Build selected modifier labels and extra cost
+    const selectedModifiers = [];
+    let extraCents = 0;
+
+    modifiers.forEach((group) => {
+      const sel = selectedMods[group.id];
+      if (!sel) return;
+      const ids = Array.isArray(sel) ? sel : [sel];
+      ids.forEach((optId) => {
+        const opt = group.options.find((o) => o.id === optId);
+        if (opt) {
+          selectedModifiers.push({ group: group.group_name, option: opt.option_name, priceCents: opt.price_cents });
+          extraCents += opt.price_cents || 0;
+        }
+      });
+    });
+
+    addToCart(item, selectedModifiers, notes, extraCents);
+    setModifierModal(null);
+  };
+
+  const addToCart = (item, modifiers = [], itemNotes = "", extraCents = 0) => {
+    // Create a unique key based on item + modifiers combo
+    const modKey = modifiers.map((m) => `${m.group}:${m.option}`).sort().join("|");
+    const cartKey = `${item.id}_${modKey}_${itemNotes}`;
+
     setCart((prev) => {
-      const ex = prev.find((c) => c.id === item.id);
-      if (ex) return prev.map((c) => (c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
-      return [...prev, { ...item, qty: 1 }];
+      const ex = prev.find((c) => c.cartKey === cartKey);
+      if (ex) return prev.map((c) => (c.cartKey === cartKey ? { ...c, qty: c.qty + 1 } : c));
+      return [...prev, { ...item, qty: 1, cartKey, modifiers, itemNotes, extraCents }];
     });
   };
 
-  const removeFromCart = (id) => {
+  const removeFromCart = (cartKey) => {
     setCart((prev) => {
-      const ex = prev.find((c) => c.id === id);
-      if (ex && ex.qty > 1) return prev.map((c) => (c.id === id ? { ...c, qty: c.qty - 1 } : c));
-      return prev.filter((c) => c.id !== id);
+      const ex = prev.find((c) => c.cartKey === cartKey);
+      if (ex && ex.qty > 1) return prev.map((c) => (c.cartKey === cartKey ? { ...c, qty: c.qty - 1 } : c));
+      return prev.filter((c) => c.cartKey !== cartKey);
     });
   };
 
-  const subtotalCents = cart.reduce((s, i) => s + i.price_cents * i.qty, 0);
+  const subtotalCents = cart.reduce((s, i) => s + (i.price_cents + (i.extraCents || 0)) * i.qty, 0);
   const feeCents = Math.round(subtotalCents * (venue.service_fee_percent / 100));
   const tipCents = showCustomTip
     ? Math.round((parseFloat(customTip) || 0) * 100)
@@ -481,13 +546,21 @@ function PatronView({ venue, menu, BRAND }) {
         venueId: venue.id,
         letter,
         color,
-        items: cart.map((i) => ({ id: i.id, name: i.item_name, qty: i.qty, price: i.price_cents / 100 })),
+        items: cart.map((i) => ({
+          id: i.id,
+          name: i.item_name,
+          qty: i.qty,
+          price: (i.price_cents + (i.extraCents || 0)) / 100,
+          modifiers: i.modifiers || [],
+          notes: i.itemNotes || "",
+        })),
         subtotalCents,
         feeCents: feeCents + tipCents,
         totalCents,
         squarePaymentId: isDemoMode ? "DEMO" : data.paymentId,
         squareOrderId: isDemoMode ? "DEMO" : data.orderId,
         patronPhone: patronPhone || null,
+        specialInstructions: specialInstructions || null,
       });
 
       // Request push notification permission after first order
@@ -554,22 +627,20 @@ function PatronView({ venue, menu, BRAND }) {
               </h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {menuByCategory[catName].map((item) => {
-                  const inCart = cart.find((c) => c.id === item.id);
+                  const inCart = cart.filter((c) => c.id === item.id);
+                  const totalInCart = inCart.reduce((s, c) => s + c.qty, 0);
                   return (
-                    <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: inCart ? `1px solid ${BRAND.primary}44` : "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: totalInCart > 0 ? `1px solid ${BRAND.primary}44` : "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1, marginBottom: 3 }}>{item.item_name}</div>
                         {item.description && <div style={{ fontSize: 12, color: BRAND.gray, fontWeight: 300 }}>{item.description}</div>}
                         <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent, marginTop: 4 }}>${(item.price_cents / 100).toFixed(2)}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {inCart && (
-                          <>
-                            <button onClick={() => removeFromCart(item.id)} style={{ width: 32, height: 32, borderRadius: "50%", border: `1px solid ${BRAND.dimText}`, background: "transparent", color: BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{inCart.qty}</span>
-                          </>
+                        {totalInCart > 0 && (
+                          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{totalInCart}</span>
                         )}
-                        <button onClick={() => addToCart(item)} style={{ width: 32, height: 32, borderRadius: "50%", border: inCart ? `1px solid ${BRAND.primary}` : `1px solid ${BRAND.dimText}`, background: inCart ? BRAND.primary : "transparent", color: inCart ? BRAND.white : BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}>+</button>
+                        <button onClick={() => handleAddItem(item)} style={{ width: 32, height: 32, borderRadius: "50%", border: totalInCart > 0 ? `1px solid ${BRAND.primary}` : `1px solid ${BRAND.dimText}`, background: totalInCart > 0 ? BRAND.primary : "transparent", color: totalInCart > 0 ? BRAND.white : BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}>+</button>
                       </div>
                     </div>
                   );
@@ -577,6 +648,88 @@ function PatronView({ venue, menu, BRAND }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* MODIFIER MODAL */}
+      {modifierModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 0 }}>
+          <div style={{ background: BRAND.darkGray, borderRadius: "20px 20px 0 0", padding: "24px 20px 32px", maxWidth: 480, width: "100%", maxHeight: "80vh", overflow: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, letterSpacing: 1 }}>{modifierModal.item.item_name}</div>
+                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: BRAND.accent, marginTop: 2 }}>${(modifierModal.item.price_cents / 100).toFixed(2)}</div>
+              </div>
+              <button onClick={() => setModifierModal(null)} style={{ background: "transparent", border: "none", color: BRAND.gray, fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {modifierModal.modifiers.map((group) => (
+              <div key={group.id} style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, color: BRAND.accent, textTransform: "uppercase", marginBottom: 8 }}>
+                  {group.group_name}
+                  {group.required && <span style={{ color: BRAND.primary, marginLeft: 6, fontSize: 10 }}>REQUIRED</span>}
+                </div>
+                {group.options.map((opt) => {
+                  const sel = modifierModal.selectedMods[group.id];
+                  const isSelected = group.max_selections > 1
+                    ? (Array.isArray(sel) && sel.includes(opt.id))
+                    : sel === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        setModifierModal((prev) => {
+                          const newMods = { ...prev.selectedMods };
+                          if (group.max_selections > 1) {
+                            const arr = Array.isArray(newMods[group.id]) ? [...newMods[group.id]] : [];
+                            if (arr.includes(opt.id)) {
+                              newMods[group.id] = arr.filter((x) => x !== opt.id);
+                            } else if (arr.length < group.max_selections) {
+                              newMods[group.id] = [...arr, opt.id];
+                            }
+                          } else {
+                            newMods[group.id] = isSelected ? null : opt.id;
+                          }
+                          return { ...prev, selectedMods: newMods };
+                        });
+                      }}
+                      style={{
+                        width: "100%", padding: "12px 14px", marginBottom: 4, borderRadius: 10,
+                        border: isSelected ? `1.5px solid ${BRAND.primary}` : "1px solid #333",
+                        background: isSelected ? BRAND.primary + "15" : "transparent",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: isSelected ? BRAND.white : BRAND.gray }}>{opt.option_name}</span>
+                      {opt.price_cents > 0 && (
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: BRAND.accent }}>+${(opt.price_cents / 100).toFixed(2)}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+
+            {/* Item-level notes */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, color: BRAND.accent, textTransform: "uppercase", marginBottom: 8 }}>Special Instructions</div>
+              <input
+                type="text"
+                placeholder="e.g., extra ice, no garnish..."
+                value={modifierModal.notes}
+                onChange={(e) => setModifierModal((prev) => ({ ...prev, notes: e.target.value }))}
+                style={{ width: "100%", padding: "12px", background: "#0a0a0a", border: "1px solid #333", borderRadius: 8, color: BRAND.white, fontFamily: "'Inter', sans-serif", fontSize: 14, outline: "none" }}
+              />
+            </div>
+
+            <button
+              onClick={confirmModifierSelection}
+              style={{ width: "100%", padding: "16px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 12, color: BRAND.white, fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}
+            >
+              ADD TO ORDER
+            </button>
+          </div>
         </div>
       )}
 
@@ -589,14 +742,43 @@ function PatronView({ venue, menu, BRAND }) {
           ) : (
             <>
               {cart.map((item) => (
-                <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1 }}>{item.item_name} × {item.qty}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent }}>${((item.price_cents * item.qty) / 100).toFixed(2)}</span>
-                    <button onClick={() => removeFromCart(item.id)} style={{ background: "transparent", border: "1px solid #333", borderRadius: "50%", width: 28, height: 28, color: BRAND.gray, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                <div key={item.cartKey} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: "1px solid #222", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1 }}>{item.item_name} × {item.qty}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent }}>${(((item.price_cents + (item.extraCents || 0)) * item.qty) / 100).toFixed(2)}</span>
+                      <button onClick={() => removeFromCart(item.cartKey)} style={{ background: "transparent", border: "1px solid #333", borderRadius: "50%", width: 28, height: 28, color: BRAND.gray, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                    </div>
                   </div>
+                  {item.modifiers && item.modifiers.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      {item.modifiers.map((m, idx) => (
+                        <span key={idx} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, marginRight: 8 }}>
+                          {m.option}{m.priceCents > 0 ? ` +$${(m.priceCents / 100).toFixed(2)}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {item.itemNotes && (
+                    <div style={{ marginTop: 4, fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.dimText, fontStyle: "italic" }}>
+                      "{item.itemNotes}"
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* Order-level special instructions */}
+              <div style={{ marginTop: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 6 }}>Order notes (optional)</div>
+                <input
+                  type="text"
+                  placeholder="e.g., allergies, group order, table number..."
+                  value={specialInstructions}
+                  onChange={(e) => setSpecialInstructions(e.target.value)}
+                  style={{ width: "100%", padding: "12px", background: "#0a0a0a", border: "1px solid #333", borderRadius: 10, color: BRAND.white, fontFamily: "'Inter', sans-serif", fontSize: 14, outline: "none" }}
+                />
+              </div>
+
               <div style={{ marginTop: 20, padding: "16px 0", borderTop: "1px solid #222" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, color: BRAND.gray }}>
                   <span>Subtotal</span><span style={{ fontFamily: "'Space Mono', monospace" }}>${(subtotalCents / 100).toFixed(2)}</span>
@@ -1051,13 +1233,37 @@ function BartenderView({ venue, BRAND }) {
                 <div style={{ padding: "5px 12px", borderRadius: 20, background: config.accent + "22", border: `1px solid ${config.accent}44`, fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: config.accent, letterSpacing: 2 }}>{config.label}</div>
               </div>
 
-              {/* Drinks */}
+              {/* Items with modifiers */}
               {(order.items || []).map((item, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.white, letterSpacing: 0.5 }}>{item.name}</span>
-                  <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+                <div key={idx}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.white, letterSpacing: 0.5 }}>{item.name}</span>
+                    <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+                  </div>
+                  {item.modifiers && item.modifiers.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, marginLeft: 8 }}>
+                      {item.modifiers.map((m, mi) => (
+                        <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, padding: "2px 6px", background: BRAND.primary + "15", borderRadius: 4 }}>
+                          {m.option}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {item.notes && (
+                    <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.accent, marginTop: 3, marginLeft: 8, fontStyle: "italic" }}>
+                      "{item.notes}"
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* Order-level special instructions */}
+              {order.special_instructions && (
+                <div style={{ padding: "8px 10px", background: BRAND.accent + "11", borderRadius: 6, border: `1px solid ${BRAND.accent}22` }}>
+                  <span style={{ fontSize: 10, fontFamily: "'Space Mono', monospace", color: BRAND.accent, letterSpacing: 1 }}>NOTE: </span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono', monospace", color: BRAND.white }}>{order.special_instructions}</span>
+                </div>
+              )}
 
               {/* Ready timestamp */}
               {order.status === "ready" && order.ready_at && (

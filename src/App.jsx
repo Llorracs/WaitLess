@@ -37,6 +37,7 @@ import QRGenerator from "./QRGenerator";
 import AdminView from "./AdminView";
 import OnboardingView from "./OnboardingView";
 import MasterAdmin from "./MasterAdmin";
+import InstallPrompt from "./InstallPrompt";
 
 // ============================================
 // URL PARSING
@@ -353,6 +354,15 @@ function PatronView({ venue, menu, BRAND }) {
   const [tipPercent, setTipPercent] = useState(0); // 0, 15, 18, 20, or custom
   const [customTip, setCustomTip] = useState("");
   const [showCustomTip, setShowCustomTip] = useState(false);
+  const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
+  const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
+
+  // Request push notification permission on mount
+  useEffect(() => {
+    if ("Notification" in window && Notification.permission === "default") {
+      // We'll ask when they place their first order, not on page load
+    }
+  }, []);
 
   // Group menu items by category
   const menuByCategory = menu.reduce((acc, item) => {
@@ -395,10 +405,21 @@ function PatronView({ venue, menu, BRAND }) {
     if (activeOrders.length === 0) return;
 
     const unsubscribers = activeOrders.map((ord) =>
-      subscribeToOrder(ord.id, (newStatus) => {
+      subscribeToOrder(ord.id, (newStatus, updatedOrder) => {
         setActiveOrders((prev) =>
           prev.map((o) => (o.id === ord.id ? { ...o, status: newStatus } : o))
         );
+
+        // Fire push notification when drink is ready
+        if (newStatus === "ready") {
+          if ("Notification" in window && Notification.permission === "granted") {
+            new Notification(`${venue.name} — Your drink is ready!`, {
+              body: `Show your ${ord.confirm_color} ${ord.confirm_letter} badge at the bar.`,
+              icon: venue.logo_url || undefined,
+              tag: `order-${ord.id}`,
+            });
+          }
+        }
       })
     );
 
@@ -459,7 +480,13 @@ function PatronView({ venue, menu, BRAND }) {
         totalCents,
         squarePaymentId: isDemoMode ? "DEMO" : data.paymentId,
         squareOrderId: isDemoMode ? "DEMO" : data.orderId,
+        patronPhone: patronPhone || null,
       });
+
+      // Request push notification permission after first order
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
 
       setActiveOrders((prev) => [...prev, newOrder]);
       setActiveOrderIndex((prev) => prev === 0 && activeOrders.length === 0 ? 0 : activeOrders.length);
@@ -641,6 +668,29 @@ function PatronView({ venue, menu, BRAND }) {
                 </div>
               </div>
 
+              {/* Notification preferences */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 10 }}>Get notified when ready</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: BRAND.cardBg, borderRadius: 10, border: "1px solid #222" }}>
+                  <span style={{ fontSize: 16 }}>📱</span>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    placeholder="Phone number (optional)"
+                    value={patronPhone}
+                    onChange={(e) => setPatronPhone(e.target.value.replace(/[^\d+\-() ]/g, ""))}
+                    style={{
+                      flex: 1, padding: "8px 0", background: "transparent", border: "none",
+                      color: BRAND.white, fontFamily: "'Space Mono', monospace", fontSize: 14,
+                      outline: "none",
+                    }}
+                  />
+                </div>
+                <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: BRAND.dimText, letterSpacing: 1, marginTop: 6 }}>
+                  WE'LL TEXT YOU WHEN YOUR ORDER IS READY · OR JUST WATCH YOUR SCREEN
+                </p>
+              </div>
+
               {/* Square card input — only show when Square is configured */}
               {!isDemoMode && (
                 <>
@@ -764,6 +814,9 @@ function PatronView({ venue, menu, BRAND }) {
           </button>
         </div>
       )}
+
+      {/* PWA Install Prompt */}
+      <InstallPrompt BRAND={BRAND} />
     </div>
   );
 }
@@ -1013,7 +1066,7 @@ function BartenderView({ venue, BRAND }) {
                   <button onClick={() => startMakingOrder(order.id)} style={{ flex: 1, padding: "13px", background: BRAND.accent, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>START MAKING</button>
                 )}
                 {order.status === "in_progress" && (
-                  <button onClick={() => markOrderReady(order.id)} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>DRINK READY</button>
+                  <button onClick={async () => { await markOrderReady(order.id); fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {}); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>DRINK READY</button>
                 )}
                 {order.status === "ready" && (
                   <button onClick={() => setVerifyOrder(order)} style={{ flex: 1, padding: "13px", background: "transparent", border: `1.5px solid ${BRAND.success}`, borderRadius: 10, color: BRAND.success, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>VERIFY & HAND OFF</button>

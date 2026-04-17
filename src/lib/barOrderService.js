@@ -152,6 +152,7 @@ export async function createBarOrder({
   totalCents,
   squarePaymentId,
   squareOrderId,
+  patronPhone,
 }) {
   const { data, error } = await supabase
     .from('bar_orders')
@@ -166,6 +167,7 @@ export async function createBarOrder({
       total_cents: totalCents,
       square_payment_id: squarePaymentId,
       square_order_id: squareOrderId,
+      patron_phone: patronPhone || null,
       status: 'pending',
     })
     .select()

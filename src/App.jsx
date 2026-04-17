@@ -330,9 +330,54 @@ export default function App() {
   // Age verification gate (patron view only — not bartender, QR, or admin)
   const needsAgeVerification = !isBartender && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
 
+  // Demo mode switcher state
+  const [demoView, setDemoView] = useState(isBartender ? "bartender" : "patron");
+  const isDemo = slug === "demo";
+
   return (
     <div style={{ minHeight: "100vh", background: BRAND.black, color: BRAND.white, fontFamily: "'Inter', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+      {/* Demo view switcher bar */}
+      {isDemo && !isAdmin && !isQR && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 200,
+          background: "#1E4D8C15", borderBottom: "1px solid #1E4D8C33",
+          padding: "8px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#D4A843" }} />
+            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#D4A843", letterSpacing: 2 }}>WAITLESS DEMO</span>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => setDemoView("patron")}
+              style={{
+                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
+                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+                border: demoView === "patron" ? "1px solid #D4A843" : "1px solid #333",
+                background: demoView === "patron" ? "#D4A84322" : "transparent",
+                color: demoView === "patron" ? "#D4A843" : "#666",
+              }}
+            >
+              PATRON VIEW
+            </button>
+            <button
+              onClick={() => setDemoView("bartender")}
+              style={{
+                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
+                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+                border: demoView === "bartender" ? "1px solid #1E4D8C" : "1px solid #333",
+                background: demoView === "bartender" ? "#1E4D8C22" : "transparent",
+                color: demoView === "bartender" ? "#1E4D8C" : "#666",
+              }}
+            >
+              BARTENDER VIEW
+            </button>
+          </div>
+        </div>
+      )}
+
       {needsAgeVerification && (
         <AgeVerification venue={venue} BRAND={BRAND} onVerified={() => setAgeVerifiedState(true)} />
       )}
@@ -340,7 +385,7 @@ export default function App() {
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
-      ) : isBartender ? (
+      ) : (isDemo ? demoView === "bartender" : isBartender) ? (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
         <PatronView venue={venue} menu={menu} BRAND={BRAND} />

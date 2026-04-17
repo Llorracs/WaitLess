@@ -24,7 +24,7 @@ import BillingView from "./BillingView";
 // Hardcode your admin email — only this email can access master admin
 const MASTER_ADMIN_EMAIL = "atimelssconcept@gmail.com";
 
-// Inline menu builder for master admin
+// Inline menu builder for master admin (with modifier management)
 function MasterMenuBuilder({ venue, onBack }) {
   const [menu, setMenu] = useState([]);
   const [editingItem, setEditingItem] = useState(null);
@@ -33,11 +33,26 @@ function MasterMenuBuilder({ venue, onBack }) {
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [saveMsg, setSaveMsg] = useState(null);
 
+  // Modifier state
+  const [modifierItemId, setModifierItemId] = useState(null); // Which item's modifiers are we editing?
+  const [modGroups, setModGroups] = useState([]);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [editingOption, setEditingOption] = useState(null);
+  const [newGroupName, setNewGroupName] = useState("");
+
   useEffect(() => { loadMenu(); }, [venue.id]);
 
   async function loadMenu() {
     const { data } = await supabase.from("menus").select("*").eq("venue_id", venue.id).order("category").order("sort_order");
     if (data) setMenu(data);
+  }
+
+  async function loadModifiers(menuItemId) {
+    const { data: groups } = await supabase.from("menu_modifiers").select("*").eq("menu_item_id", menuItemId).order("sort_order");
+    if (!groups || groups.length === 0) { setModGroups([]); return; }
+    const groupIds = groups.map((g) => g.id);
+    const { data: options } = await supabase.from("modifier_options").select("*").in("modifier_id", groupIds).order("sort_order");
+    setModGroups(groups.map((g) => ({ ...g, options: (options || []).filter((o) => o.modifier_id === g.id) })));
   }
 
   const flash = (msg) => { setSaveMsg(msg); setTimeout(() => setSaveMsg(null), 2000); };
@@ -54,8 +69,134 @@ function MasterMenuBuilder({ venue, onBack }) {
   const handleDelete = async (id) => { if (!confirm("Remove?")) return; await supabase.from("menus").delete().eq("id", id); await loadMenu(); flash("Removed"); };
   const handleToggle = async (item) => { await supabase.from("menus").update({ active: !item.active }).eq("id", item.id); await loadMenu(); flash(item.active ? "Hidden" : "Visible"); };
 
-  const categories = [...new Set(menu.map((m) => m.category))];
+  // Modifier CRUD
+  const addModGroup = async () => {
+    if (!newGroupName.trim()) return;
+    await supabase.from("menu_modifiers").insert({ menu_item_id: modifierItemId, group_name: newGroupName.trim(), required: false, max_selections: 1, sort_order: modGroups.length + 1 });
+    setNewGroupName("");
+    await loadModifiers(modifierItemId);
+    flash("Group added");
+  };
 
+  const updateModGroup = async (group) => {
+    await supabase.from("menu_modifiers").update({ group_name: group.group_name, required: group.required, max_selections: group.max_selections }).eq("id", group.id);
+    await loadModifiers(modifierItemId);
+    setEditingGroup(null);
+    flash("Group updated");
+  };
+
+  const deleteModGroup = async (groupId) => {
+    if (!confirm("Delete this modifier group and all its options?")) return;
+    await supabase.from("modifier_options").delete().eq("modifier_id", groupId);
+    await supabase.from("menu_modifiers").delete().eq("id", groupId);
+    await loadModifiers(modifierItemId);
+    flash("Group removed");
+  };
+
+  const addOption = async (groupId) => {
+    await supabase.from("modifier_options").insert({ modifier_id: groupId, option_name: "New Option", price_cents: 0, is_default: false, sort_order: 99 });
+    await loadModifiers(modifierItemId);
+    flash("Option added");
+  };
+
+  const updateOption = async (opt) => {
+    await supabase.from("modifier_options").update({ option_name: opt.option_name, price_cents: opt.price_cents, is_default: opt.is_default, sort_order: opt.sort_order }).eq("id", opt.id);
+    await loadModifiers(modifierItemId);
+    setEditingOption(null);
+    flash("Option saved");
+  };
+
+  const deleteOption = async (optId) => {
+    await supabase.from("modifier_options").delete().eq("id", optId);
+    await loadModifiers(modifierItemId);
+    flash("Option removed");
+  };
+
+  const categories = [...new Set(menu.map((m) => m.category))];
+  const modifierItem = menu.find((m) => m.id === modifierItemId);
+
+  // ---- MODIFIER EDITING VIEW ----
+  if (modifierItemId && modifierItem) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <button onClick={() => { setModifierItemId(null); setModGroups([]); }} style={MS.backBtn}>← BACK TO MENU</button>
+          {saveMsg && <span style={MS.flash}>{saveMsg}</span>}
+        </div>
+        <h3 style={MS.manageTitle}>Modifiers — {modifierItem.item_name}</h3>
+        <p style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>Add customization options customers can choose when ordering this item.</p>
+
+        {modGroups.map((group) => (
+          <div key={group.id} style={{ marginBottom: 20, padding: 14, background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>
+            {/* Group header */}
+            {editingGroup?.id === group.id ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                <input value={editingGroup.group_name} onChange={(e) => setEditingGroup({ ...editingGroup, group_name: e.target.value })} style={MS.input} placeholder="Group name" />
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#aaa", cursor: "pointer" }}>
+                    <input type="checkbox" checked={editingGroup.required} onChange={(e) => setEditingGroup({ ...editingGroup, required: e.target.checked })} /> Required
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "#aaa" }}>
+                    Max picks:
+                    <input type="number" min="1" max="10" value={editingGroup.max_selections} onChange={(e) => setEditingGroup({ ...editingGroup, max_selections: parseInt(e.target.value || 1) })} style={{ ...MS.input, width: 50, padding: "4px 6px" }} />
+                  </label>
+                </div>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button onClick={() => setEditingGroup(null)} style={MS.dimBtn}>CANCEL</button>
+                  <button onClick={() => updateModGroup(editingGroup)} style={MS.saveBtn}>SAVE</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div>
+                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: "#d4a843" }}>{group.group_name}</span>
+                  <span style={{ fontSize: 10, color: "#666", marginLeft: 8, fontFamily: "'Space Mono', monospace" }}>
+                    {group.required ? "REQUIRED" : "OPTIONAL"} · {group.max_selections > 1 ? `Pick up to ${group.max_selections}` : "Pick 1"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setEditingGroup({ ...group })} style={MS.iconBtn}>✏️</button>
+                  <button onClick={() => deleteModGroup(group.id)} style={MS.iconBtn}>🗑</button>
+                </div>
+              </div>
+            )}
+
+            {/* Options list */}
+            {group.options.map((opt) =>
+              editingOption?.id === opt.id ? (
+                <div key={opt.id} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center" }}>
+                  <input value={editingOption.option_name} onChange={(e) => setEditingOption({ ...editingOption, option_name: e.target.value })} style={{ ...MS.input, flex: 1 }} placeholder="Option name" />
+                  <input type="number" step="0.01" value={(editingOption.price_cents / 100).toFixed(2)} onChange={(e) => setEditingOption({ ...editingOption, price_cents: Math.round(parseFloat(e.target.value || 0) * 100) })} style={{ ...MS.input, width: 70 }} placeholder="+$" />
+                  <label style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                    <input type="checkbox" checked={editingOption.is_default} onChange={(e) => setEditingOption({ ...editingOption, is_default: e.target.checked })} /> Default
+                  </label>
+                  <button onClick={() => updateOption(editingOption)} style={{ ...MS.saveBtn, padding: "4px 10px", fontSize: 10 }}>OK</button>
+                  <button onClick={() => setEditingOption(null)} style={{ ...MS.dimBtn, padding: "4px 10px", fontSize: 10 }}>X</button>
+                </div>
+              ) : (
+                <div key={opt.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", marginBottom: 2, borderRadius: 6, background: "#141414" }}>
+                  <span style={{ flex: 1, fontSize: 13, color: "#ccc" }}>{opt.option_name}</span>
+                  {opt.price_cents !== 0 && <span style={{ fontSize: 11, color: opt.price_cents > 0 ? "#d4a843" : "#2ecc71", fontFamily: "'Space Mono', monospace" }}>{opt.price_cents > 0 ? "+" : ""}${(opt.price_cents / 100).toFixed(2)}</span>}
+                  {opt.is_default && <span style={{ fontSize: 8, color: "#1E4D8C", fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "1px 5px", background: "#1E4D8C22", borderRadius: 4 }}>DEFAULT</span>}
+                  <button onClick={() => setEditingOption({ ...opt })} style={MS.iconBtn}>✏️</button>
+                  <button onClick={() => deleteOption(opt.id)} style={MS.iconBtn}>🗑</button>
+                </div>
+              )
+            )}
+            <button onClick={() => addOption(group.id)} style={{ ...MS.addBtn, marginTop: 6, fontSize: 9 }}>+ Add Option</button>
+          </div>
+        ))}
+
+        {/* Add new modifier group */}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input placeholder="New modifier group (e.g., Size, Style, Sauce)" value={newGroupName} onChange={(e) => setNewGroupName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addModGroup()} style={{ ...MS.input, flex: 1 }} />
+          <button onClick={addModGroup} style={MS.saveBtn}>ADD GROUP</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- MENU LIST VIEW ----
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -88,6 +229,7 @@ function MasterMenuBuilder({ venue, onBack }) {
                   {item.description && <span style={MS.itemDesc}>{item.description}</span>}
                 </div>
                 <span style={MS.itemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
+                <button onClick={() => { setModifierItemId(item.id); loadModifiers(item.id); }} style={{ ...MS.iconBtn, fontSize: 9, fontFamily: "'Space Mono', monospace", color: "#d4a843", border: "1px solid #d4a84333", borderRadius: 4, padding: "2px 6px" }}>MODS</button>
                 <button onClick={() => handleToggle(item)} style={MS.iconBtn}>{item.active ? "👁" : "🚫"}</button>
                 <button onClick={() => setEditingItem({ ...item })} style={MS.iconBtn}>✏️</button>
                 <button onClick={() => handleDelete(item.id)} style={MS.iconBtn}>🗑</button>

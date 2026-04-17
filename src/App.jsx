@@ -220,7 +220,39 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
+  const [demoView, setDemoView] = useState("patron");
   const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+
+  // Set demo view based on URL on mount
+  useEffect(() => {
+    if (isBartender) setDemoView("bartender");
+  }, []);
+
+  // OAuth redirect handler
+  useEffect(() => {
+    if (!isOAuthComplete) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const venueId = urlParams.get("venue_id");
+    const squareStatus = urlParams.get("square");
+    const oauthError = urlParams.get("error");
+
+    async function redirectToAdmin() {
+      if (venueId) {
+        const { data } = await supabase
+          .from("venues")
+          .select("slug")
+          .eq("id", venueId)
+          .single();
+        if (data?.slug) {
+          const params = squareStatus ? `?square=${squareStatus}` : oauthError ? `?error=${oauthError}` : "";
+          window.location.href = `/${data.slug}/admin${params}`;
+          return;
+        }
+      }
+      window.location.href = "/";
+    }
+    redirectToAdmin();
+  }, [isOAuthComplete]);
 
   // Legal pages — no venue needed
   if (isPrivacy) return <PrivacyPolicy />;
@@ -236,33 +268,8 @@ export default function App() {
     return <MasterAdmin />;
   }
 
-  // OAuth complete — redirect to the venue's admin page with query params
+  // OAuth complete — show loading while redirect happens
   if (isOAuthComplete) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const venueId = urlParams.get("venue_id");
-    const squareStatus = urlParams.get("square");
-    const oauthError = urlParams.get("error");
-
-    // Look up the venue slug from ID, then redirect
-    useEffect(() => {
-      async function redirectToAdmin() {
-        if (venueId) {
-          const { data } = await supabase
-            .from("venues")
-            .select("slug")
-            .eq("id", venueId)
-            .single();
-          if (data?.slug) {
-            const params = squareStatus ? `?square=${squareStatus}` : oauthError ? `?error=${oauthError}` : "";
-            window.location.href = `/${data.slug}/admin${params}`;
-            return;
-          }
-        }
-        window.location.href = "/";
-      }
-      redirectToAdmin();
-    }, []);
-
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", letterSpacing: 2 }}>CONNECTING SQUARE...</p>
@@ -330,8 +337,6 @@ export default function App() {
   // Age verification gate (patron view only — not bartender, QR, or admin)
   const needsAgeVerification = !isBartender && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
 
-  // Demo mode switcher state
-  const [demoView, setDemoView] = useState(isBartender ? "bartender" : "patron");
   const isDemo = slug === "demo";
 
   return (

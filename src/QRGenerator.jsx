@@ -262,7 +262,7 @@ const baseStyles = {
   subtitle: { fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#888", marginTop: 6 },
 
   loading: { display: "flex", flexDirection: "column", alignItems: "center", padding: 60, gap: 12 },
-  spinner: { width: 40, height: 40, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#e91e8c", animation: "spin 1s linear infinite" },
+  spinner: { width: 40, height: 40, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite" },
   loadingText: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", letterSpacing: 2 },
 
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 20, marginBottom: 20 },
@@ -287,7 +287,7 @@ const baseStyles = {
   cardDesc: { fontSize: 12, color: "#888", textAlign: "center", lineHeight: 1.5, margin: 0 },
   downloadBtn: {
     padding: "12px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 700,
     letterSpacing: 2, cursor: "pointer",
   },

@@ -195,7 +195,7 @@ export default function BillingView({ venue, BRAND }) {
             {/* Annual */}
             <div style={{ ...S.planCard, ...S.planFeatured }}>
               <div style={S.saveBadge}>SAVE $589</div>
-              <span style={{ ...S.planLabel, color: "#e91e8c" }}>ANNUAL</span>
+              <span style={{ ...S.planLabel, color: "#1E4D8C" }}>ANNUAL</span>
               <div style={S.planPrice}>
                 <span style={S.planCurrency}>$</span>
                 <span style={S.planAmount}>1,799</span>
@@ -216,7 +216,7 @@ export default function BillingView({ venue, BRAND }) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => handleCheckout("annual")} disabled={loading} style={{ ...S.planBtn, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>
+              <button onClick={() => handleCheckout("annual")} disabled={loading} style={{ ...S.planBtn, background: "linear-gradient(135deg, #1E4D8C, #d4a843)" }}>
                 {loading ? "LOADING..." : "START FREE TRIAL"}
               </button>
               <span style={S.planNote}>14 days free, then $1,799/yr</span>
@@ -292,7 +292,7 @@ const S = {
 
   trialInfo: { display: "flex", flexDirection: "column", gap: 8 },
   trialBar: { width: "100%", height: 6, borderRadius: 3, background: "#222", overflow: "hidden" },
-  trialProgress: { height: "100%", borderRadius: 3, background: "linear-gradient(90deg, #d4a843, #e91e8c)", transition: "width 0.5s ease" },
+  trialProgress: { height: "100%", borderRadius: 3, background: "linear-gradient(90deg, #d4a843, #1E4D8C)", transition: "width 0.5s ease" },
   trialText: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#d4a843", letterSpacing: 1 },
 
   warningBox: { padding: "12px", background: "#e74c3c15", borderRadius: 8, border: "1px solid #e74c3c33" },
@@ -314,10 +314,10 @@ const S = {
     padding: "28px 24px", background: "#0a0a0a", borderRadius: 16, border: "1px solid #1a1a1a",
     display: "flex", flexDirection: "column", gap: 12, position: "relative",
   },
-  planFeatured: { border: "1px solid #e91e8c44", boxShadow: "0 0 30px #e91e8c11" },
+  planFeatured: { border: "1px solid #1E4D8C44", boxShadow: "0 0 30px #1E4D8C11" },
   saveBadge: {
     position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1,
   },
   planLabel: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#d4a843", letterSpacing: 3 },
@@ -343,7 +343,7 @@ const S = {
   valueTitle: { fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, margin: "0 0 16px", textAlign: "center", color: "#d4a843" },
   valueGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 16 },
   valueItem: { display: "flex", flexDirection: "column", gap: 4, textAlign: "center" },
-  valueNum: { fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, color: "#e91e8c" },
+  valueNum: { fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, color: "#1E4D8C" },
   valueDesc: { fontSize: 11, color: "#888", lineHeight: 1.5 },
 
   // FAQ

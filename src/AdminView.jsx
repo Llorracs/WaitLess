@@ -454,7 +454,7 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
     tagline: venue.tagline || "",
     bartender_pin: venue.bartender_pin || "0000",
     service_fee_percent: venue.service_fee_percent || 5,
-    primary: venue.brand_colors?.primary || "#e91e8c",
+    primary: venue.brand_colors?.primary || "#1E4D8C",
     accent: venue.brand_colors?.accent || "#d4a843",
     background: venue.brand_colors?.background || "#0a0a0a",
   });
@@ -736,7 +736,7 @@ const S = {
   },
   spinner: {
     width: 40, height: 40, borderRadius: "50%", border: "3px solid #222",
-    borderTopColor: "#e91e8c", animation: "spin 1s linear infinite",
+    borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite",
   },
 
   // Auth
@@ -747,7 +747,7 @@ const S = {
   authLogo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, letterSpacing: 4,
     textAlign: "center", margin: 0,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   authSub: {
     fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", textAlign: "center",
@@ -759,10 +759,10 @@ const S = {
     color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600,
     letterSpacing: 2, cursor: "pointer",
   },
-  authTabActive: { background: "#e91e8c22", borderColor: "#e91e8c", color: "#e91e8c" },
+  authTabActive: { background: "#1E4D8C22", borderColor: "#1E4D8C", color: "#1E4D8C" },
   authButton: {
     padding: "14px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer",
   },
@@ -775,7 +775,7 @@ const S = {
   },
   headerTitle: {
     fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, letterSpacing: 4, margin: 0,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   headerSub: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 2, margin: "2px 0 0", textTransform: "uppercase" },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
@@ -795,7 +795,7 @@ const S = {
     color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 500,
     letterSpacing: 2, cursor: "pointer",
   },
-  tabActive: { background: "#e91e8c22", borderColor: "#e91e8c", color: "#e91e8c" },
+  tabActive: { background: "#1E4D8C22", borderColor: "#1E4D8C", color: "#1E4D8C" },
   content: { padding: "20px 0" },
 
   // Menu builder
@@ -831,7 +831,7 @@ const S = {
 
   // Item editor
   editorCard: {
-    padding: 16, background: "#141414", borderRadius: 12, border: "1px solid #e91e8c44",
+    padding: 16, background: "#141414", borderRadius: 12, border: "1px solid #1E4D8C44",
     display: "flex", flexDirection: "column", gap: 10, marginBottom: 8,
   },
   editorRow: { display: "flex", gap: 10 },
@@ -873,7 +873,7 @@ const S = {
 
   // Buttons
   smallBtn: {
-    padding: "8px 16px", borderRadius: 8, border: "none", background: "#e91e8c",
+    padding: "8px 16px", borderRadius: 8, border: "none", background: "#1E4D8C",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
     letterSpacing: 2, cursor: "pointer",
   },
@@ -884,7 +884,7 @@ const S = {
   },
   saveBtn: {
     padding: "16px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer", marginTop: 8,
   },

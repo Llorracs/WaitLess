@@ -113,7 +113,7 @@ const S = {
   bannerActions: { display: "flex", alignItems: "center", gap: 8, flexShrink: 0 },
   installBtn: {
     padding: "8px 16px", borderRadius: 8, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12,
     fontWeight: 700, letterSpacing: 2, cursor: "pointer",
   },

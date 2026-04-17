@@ -51,7 +51,7 @@ export default function LandingPage() {
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes shimmer { 0% { background-position: -200% center; } 100% { background-position: 200% center; } }
         @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-8px); } }
-        @keyframes pulse { 0%, 100% { box-shadow: 0 0 20px #e91e8c44; } 50% { box-shadow: 0 0 40px #e91e8c66; } }
+        @keyframes pulse { 0%, 100% { box-shadow: 0 0 20px #1E4D8C44; } 50% { box-shadow: 0 0 40px #1E4D8C66; } }
         .hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
         .hover-lift:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.4); }
       `}</style>
@@ -278,12 +278,12 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
-            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>START FREE TRIAL</a>
+            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #1E4D8C, #d4a843)" }}>START FREE TRIAL</a>
           </div>
 
           <div className="hover-lift" style={{ ...S.pricingCard, ...S.pricingFeatured }}>
-            <div style={{ position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12, background: "linear-gradient(135deg, #e91e8c, #d4a843)", fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>SAVE $589</div>
-            <span style={{ ...S.pricingTier, color: "#e91e8c" }}>ANNUAL</span>
+            <div style={{ position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>SAVE $589</div>
+            <span style={{ ...S.pricingTier, color: "#1E4D8C" }}>ANNUAL</span>
             <div style={S.pricingPrice}>
               <span style={S.pricingCurrency}>$</span>
               <span style={S.pricingAmount}>1,799</span>
@@ -302,7 +302,7 @@ export default function LandingPage() {
                 </div>
               ))}
             </div>
-            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #e91e8c, #d4a843)" }}>START FREE TRIAL</a>
+            <a href="#contact" style={{ ...S.pricingCta, background: "linear-gradient(135deg, #1E4D8C, #d4a843)" }}>START FREE TRIAL</a>
           </div>
         </div>
 
@@ -310,7 +310,7 @@ export default function LandingPage() {
         <div style={{ maxWidth: 600, margin: "32px auto 0", padding: "20px 24px", background: "#0a0a0a", borderRadius: 14, border: "1px solid #1a1a1a", textAlign: "center" }}>
           <p style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, color: "#d4a843", margin: "0 0 8px" }}>THE MATH</p>
           <p style={{ fontSize: 14, color: "#ccc", lineHeight: 1.8, margin: 0 }}>
-            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#e91e8c" }}>$480+ in additional monthly revenue</strong>. Waitless pays for itself in a single busy weekend.
+            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#1E4D8C" }}>$480+ in additional monthly revenue</strong>. Waitless pays for itself in a single busy weekend.
           </p>
         </div>
       </section>
@@ -401,12 +401,12 @@ const S = {
   },
   navLogo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 4,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   navLinks: { display: "flex", alignItems: "center", gap: 24 },
   navLink: { color: "#888", fontSize: 13, textDecoration: "none", fontWeight: 500, letterSpacing: 0.5 },
   ctaSmall: {
-    padding: "8px 20px", borderRadius: 8, background: "#e91e8c", color: "#fff",
+    padding: "8px 20px", borderRadius: 8, background: "#1E4D8C", color: "#fff",
     fontSize: 11, fontFamily: "'Oswald', sans-serif", fontWeight: 600, letterSpacing: 2,
     textDecoration: "none",
   },
@@ -420,13 +420,13 @@ const S = {
   },
   heroGlow: {
     position: "absolute", top: "20%", left: "10%", width: 400, height: 400,
-    borderRadius: "50%", background: "radial-gradient(circle, #e91e8c15, transparent 70%)",
+    borderRadius: "50%", background: "radial-gradient(circle, #1E4D8C15, transparent 70%)",
     filter: "blur(60px)", pointerEvents: "none",
   },
   heroContent: { flex: 1, minWidth: 320, position: "relative", zIndex: 1 },
   heroBadge: {
     display: "inline-block", padding: "6px 16px", borderRadius: 20,
-    background: "#e91e8c15", border: "1px solid #e91e8c33", color: "#e91e8c",
+    background: "#1E4D8C15", border: "1px solid #1E4D8C33", color: "#1E4D8C",
     fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 3, marginBottom: 24,
   },
   heroTitle: {
@@ -434,13 +434,13 @@ const S = {
     lineHeight: 1.1, margin: "0 0 24px",
   },
   heroAccent: {
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   heroSub: { fontSize: 18, color: "#999", lineHeight: 1.7, maxWidth: 500, margin: "0 0 32px", fontWeight: 300 },
   heroCtas: { display: "flex", gap: 16, flexWrap: "wrap" },
   heroPrimary: {
     padding: "16px 32px", borderRadius: 12, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer", textDecoration: "none", textAlign: "center",
     animation: "pulse 3s ease infinite",
@@ -455,14 +455,14 @@ const S = {
   phoneMockup: {
     width: 260, height: 480, borderRadius: 32, background: "#0a0a0a",
     border: "2px solid #222", overflow: "hidden", flexShrink: 0,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 40px #e91e8c11",
+    boxShadow: "0 20px 60px rgba(0,0,0,0.5), 0 0 40px #1E4D8C11",
     position: "relative", zIndex: 1,
   },
   phoneScreen: { padding: "20px 16px", display: "flex", flexDirection: "column", gap: 10 },
   phoneHeader: { display: "flex", flexDirection: "column", alignItems: "center", padding: "8px 0 12px" },
   phoneVenue: {
     fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 3,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   phoneTag: { fontFamily: "'Space Mono', monospace", fontSize: 7, color: "#666", letterSpacing: 2 },
   phoneCategory: {
@@ -480,7 +480,7 @@ const S = {
     fontSize: 14, color: "#666",
   },
   phoneCart: {
-    marginTop: 8, padding: "12px", borderRadius: 10, background: "#e91e8c",
+    marginTop: 8, padding: "12px", borderRadius: 10, background: "#1E4D8C",
     fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 700, letterSpacing: 2,
     color: "#fff", textAlign: "center",
   },
@@ -492,7 +492,7 @@ const S = {
     flexWrap: "wrap", maxWidth: 900, margin: "0 auto",
   },
   stat: { textAlign: "center", minWidth: 140 },
-  statValue: { display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 36, fontWeight: 700, color: "#e91e8c" },
+  statValue: { display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 36, fontWeight: 700, color: "#1E4D8C" },
   statLabel: { fontSize: 12, color: "#888", letterSpacing: 0.5, marginTop: 4 },
 
   // Sections
@@ -511,7 +511,7 @@ const S = {
     borderRadius: 16, border: "1px solid #1a1a1a", textAlign: "center",
   },
   stepIcon: { fontSize: 36, marginBottom: 12 },
-  stepNum: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e91e8c", letterSpacing: 2, marginBottom: 12 },
+  stepNum: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#1E4D8C", letterSpacing: 2, marginBottom: 12 },
   stepTitle: { fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, letterSpacing: 1, margin: "0 0 8px" },
   stepDesc: { fontSize: 14, color: "#888", lineHeight: 1.7, margin: 0, fontWeight: 300 },
 
@@ -544,7 +544,7 @@ const S = {
   demoIcon: { fontSize: 36 },
   demoLabel: { fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 3 },
   demoDesc: { fontSize: 12, color: "#888", fontWeight: 300 },
-  demoLink: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e91e8c", letterSpacing: 1, marginTop: 8 },
+  demoLink: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#1E4D8C", letterSpacing: 1, marginTop: 8 },
 
   // Pricing
   pricingCards: { display: "flex", gap: 20, justifyContent: "center", flexWrap: "wrap", maxWidth: 700, margin: "0 auto" },
@@ -552,7 +552,7 @@ const S = {
     flex: "1 1 280px", maxWidth: 320, padding: "36px 28px", background: "#0a0a0a",
     borderRadius: 16, border: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 16,
   },
-  pricingFeatured: { border: "1px solid #e91e8c44", boxShadow: "0 0 30px #e91e8c11" },
+  pricingFeatured: { border: "1px solid #1E4D8C44", boxShadow: "0 0 30px #1E4D8C11" },
   pricingTier: { fontFamily: "'Space Mono', monospace", fontSize: 11, letterSpacing: 3, color: "#d4a843" },
   pricingPrice: { display: "flex", alignItems: "baseline", gap: 2 },
   pricingCurrency: { fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 300, color: "#888" },
@@ -585,7 +585,7 @@ const S = {
   },
   footerLogo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 4,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   footerTag: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#444", letterSpacing: 2 },
   footerCopy: { fontSize: 11, color: "#333", marginTop: 8 },

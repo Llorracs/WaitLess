@@ -53,8 +53,8 @@ export default function OnboardingView({ BRAND }) {
           <div key={label} style={S.progressStep}>
             <div style={{
               ...S.progressDot,
-              background: i < step ? "#2ecc71" : i === step ? "#e91e8c" : "#333",
-              borderColor: i < step ? "#2ecc71" : i === step ? "#e91e8c" : "#333",
+              background: i < step ? "#2ecc71" : i === step ? "#1E4D8C" : "#333",
+              borderColor: i < step ? "#2ecc71" : i === step ? "#1E4D8C" : "#333",
             }}>
               {i < step ? "✓" : i + 1}
             </div>
@@ -233,7 +233,7 @@ function VenueStep({ user, onComplete, error, setError }) {
         owner_id: user.id,
         bartender_pin: "1234",
         service_fee_percent: 5,
-        brand_colors: { primary: "#e91e8c", accent: "#d4a843", background: "#0a0a0a" },
+        brand_colors: { primary: "#1E4D8C", accent: "#d4a843", background: "#0a0a0a" },
       })
       .select()
       .single();
@@ -448,7 +448,7 @@ function MenuStep({ venue, onComplete }) {
 // STEP 4: BRANDING
 // ============================================
 function BrandingStep({ venue, setVenue, onComplete }) {
-  const [primary, setPrimary] = useState(venue.brand_colors?.primary || "#e91e8c");
+  const [primary, setPrimary] = useState(venue.brand_colors?.primary || "#1E4D8C");
   const [accent, setAccent] = useState(venue.brand_colors?.accent || "#d4a843");
   const [background, setBackground] = useState(venue.brand_colors?.background || "#0a0a0a");
   const [pin, setPin] = useState(venue.bartender_pin || "1234");
@@ -631,7 +631,7 @@ const S = {
   header: { textAlign: "center", padding: "32px 0 8px" },
   logo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, margin: 0,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   tagline: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 3, margin: "4px 0 0" },
 
@@ -678,18 +678,18 @@ const S = {
   // Buttons
   primaryBtn: {
     padding: "16px", borderRadius: 12, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer", textAlign: "center", textDecoration: "none",
   },
   secondaryBtn: {
-    padding: "12px", borderRadius: 10, border: "1px dashed #e91e8c44",
-    background: "#e91e8c11", color: "#e91e8c",
+    padding: "12px", borderRadius: 10, border: "1px dashed #1E4D8C44",
+    background: "#1E4D8C11", color: "#1E4D8C",
     fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600,
     letterSpacing: 2, cursor: "pointer",
   },
   linkBtn: {
-    background: "none", border: "none", color: "#e91e8c", cursor: "pointer",
+    background: "none", border: "none", color: "#1E4D8C", cursor: "pointer",
     fontFamily: "'Inter', sans-serif", fontSize: 13, textDecoration: "underline",
   },
   altAuth: { fontSize: 13, color: "#888", textAlign: "center", margin: 0 },
@@ -747,7 +747,7 @@ const S = {
   },
   launchBtn: {
     flex: 1, padding: "14px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700,
     letterSpacing: 2, cursor: "pointer", textAlign: "center", textDecoration: "none",
   },

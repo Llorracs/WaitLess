@@ -161,7 +161,7 @@ export default function AnalyticsView({ venue, BRAND }) {
 
           {/* Order status summary */}
           <div style={S.statusRow}>
-            <StatusPill label="Active" count={activeOrders.length} color="#e91e8c" />
+            <StatusPill label="Active" count={activeOrders.length} color="#1E4D8C" />
             <StatusPill label="Completed" count={completedOrders.length} color="#2ecc71" />
             <StatusPill label="Expired" count={expiredOrders.length} color="#e74c3c" />
           </div>
@@ -177,7 +177,7 @@ export default function AnalyticsView({ venue, BRAND }) {
                       <div style={{
                         ...S.bar,
                         height: `${Math.max(4, (day.revenue / maxDailyRevenue) * 100)}%`,
-                        background: `linear-gradient(180deg, #e91e8c, #d4a843)`,
+                        background: `linear-gradient(180deg, #1E4D8C, #d4a843)`,
                       }} />
                     </div>
                     <span style={S.chartLabel}>
@@ -316,10 +316,10 @@ const S = {
     color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500,
     letterSpacing: 1, cursor: "pointer",
   },
-  rangeBtnActive: { background: "#e91e8c22", borderColor: "#e91e8c", color: "#e91e8c" },
+  rangeBtnActive: { background: "#1E4D8C22", borderColor: "#1E4D8C", color: "#1E4D8C" },
 
   loading: { display: "flex", justifyContent: "center", padding: 60 },
-  spinner: { width: 36, height: 36, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#e91e8c", animation: "spin 1s linear infinite" },
+  spinner: { width: 36, height: 36, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite" },
 
   // KPI cards
   kpiGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 12 },
@@ -363,7 +363,7 @@ const S = {
     display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
     background: "#141414", borderRadius: 8, border: "1px solid #222",
   },
-  itemRank: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e91e8c", width: 24 },
+  itemRank: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#1E4D8C", width: 24 },
   itemName: { flex: 1, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 500, letterSpacing: 0.5 },
   itemQty: { fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#888" },
   itemRevenue: { fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#d4a843" },

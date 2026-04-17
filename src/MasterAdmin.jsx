@@ -127,7 +127,7 @@ function MasterMenuBuilder({ venue, onBack }) {
 function MasterVenueSettings({ venue, setManagedVenue, onBack }) {
   const [form, setForm] = useState({
     name: venue.name || "", tagline: venue.tagline || "", bartender_pin: venue.bartender_pin || "0000",
-    service_fee_percent: venue.service_fee_percent || 5, primary: venue.brand_colors?.primary || "#e91e8c",
+    service_fee_percent: venue.service_fee_percent || 5, primary: venue.brand_colors?.primary || "#1E4D8C",
     accent: venue.brand_colors?.accent || "#d4a843", background: venue.brand_colors?.background || "#0a0a0a",
     square_app_id: venue.square_app_id || "", square_access_token: venue.square_access_token || "",
     square_location_id: venue.square_location_id || "", square_environment: venue.square_environment || "sandbox",
@@ -347,7 +347,7 @@ export default function MasterAdmin() {
         /* ---- MANAGE MODE — full admin for a single venue ---- */
         <div style={{ padding: "20px 0" }}>
           {/* Manage header */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "12px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #e91e8c33" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "12px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1E4D8C33" }}>
             <div>
               <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 2 }}>{managedVenue.name?.toUpperCase()}</span>
               <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#d4a843", letterSpacing: 2 }}>MANAGING VENUE</span>
@@ -364,19 +364,19 @@ export default function MasterAdmin() {
               { key: "qr", label: "QR Code" },
             ].map((tab) => (
               <button key={tab.key} onClick={() => setManageTab(tab.key)} style={{
-                padding: "8px 16px", borderRadius: 8, border: manageTab === tab.key ? "1px solid #e91e8c" : "1px solid #222",
-                background: manageTab === tab.key ? "#e91e8c22" : "transparent",
-                color: manageTab === tab.key ? "#e91e8c" : "#888",
+                padding: "8px 16px", borderRadius: 8, border: manageTab === tab.key ? "1px solid #1E4D8C" : "1px solid #222",
+                background: manageTab === tab.key ? "#1E4D8C22" : "transparent",
+                color: manageTab === tab.key ? "#1E4D8C" : "#888",
                 fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500, letterSpacing: 1, cursor: "pointer",
               }}>{tab.label}</button>
             ))}
           </div>
 
           {/* Manage content */}
-          {manageTab === "analytics" && <AnalyticsView venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#e91e8c", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
+          {manageTab === "analytics" && <AnalyticsView venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
           {manageTab === "menu" && <MasterMenuBuilder venue={managedVenue} onBack={() => setManageTab("analytics")} />}
           {manageTab === "settings" && <MasterVenueSettings venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
-          {manageTab === "qr" && <QRGenerator venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#e91e8c", accent: managedVenue.brand_colors?.accent || "#d4a843" }} embedded={true} />}
+          {manageTab === "qr" && <QRGenerator venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} embedded={true} />}
         </div>
       ) : (
         <>
@@ -398,7 +398,7 @@ export default function MasterAdmin() {
                 <span style={S.kpiSub}>{platformStats.completedOrders} orders (30d)</span>
               </div>
               <div style={S.kpiCard}>
-                <span style={{ ...S.kpiLabel, color: "#e91e8c" }}>TOTAL FEES</span>
+                <span style={{ ...S.kpiLabel, color: "#1E4D8C" }}>TOTAL FEES</span>
                 <span style={S.kpiValue}>${(platformStats.totalFees / 100).toFixed(2)}</span>
                 <span style={S.kpiSub}>service fees collected (30d)</span>
               </div>
@@ -543,7 +543,7 @@ const S = {
   },
   spinner: {
     width: 40, height: 40, borderRadius: "50%", border: "3px solid #222",
-    borderTopColor: "#e91e8c", animation: "spin 1s linear infinite",
+    borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite",
   },
 
   // Auth
@@ -554,7 +554,7 @@ const S = {
   logo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4,
     textAlign: "center", margin: 0,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   authSub: {
     fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666", textAlign: "center",
@@ -567,7 +567,7 @@ const S = {
   error: { color: "#e74c3c", fontSize: 13, margin: 0, textAlign: "center" },
   primaryBtn: {
     padding: "14px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer",
   },
@@ -579,7 +579,7 @@ const S = {
   },
   headerTitle: {
     fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, letterSpacing: 4, margin: 0,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
   },
   headerSub: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 3, margin: "2px 0 0" },
   logoutBtn: {
@@ -593,7 +593,7 @@ const S = {
     padding: "18px", background: "#0a0a0a", borderRadius: 12, border: "1px solid #1a1a1a",
     display: "flex", flexDirection: "column", gap: 4,
   },
-  kpiLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#e91e8c", letterSpacing: 2 },
+  kpiLabel: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#1E4D8C", letterSpacing: 2 },
   kpiValue: { fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700 },
   kpiSub: { fontSize: 11, color: "#666" },
 
@@ -640,8 +640,8 @@ const S = {
     textDecoration: "none",
   },
   manageBtn: {
-    padding: "6px 14px", borderRadius: 6, border: "1px solid #e91e8c",
-    background: "#e91e8c22", color: "#e91e8c", fontFamily: "'Space Mono', monospace",
+    padding: "6px 14px", borderRadius: 6, border: "1px solid #1E4D8C",
+    background: "#1E4D8C22", color: "#1E4D8C", fontFamily: "'Space Mono', monospace",
     fontSize: 10, letterSpacing: 1, cursor: "pointer", fontWeight: 700,
   },
 
@@ -682,9 +682,9 @@ const MS = {
   itemPrice: { fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#d4a843" },
   iconBtn: { background: "transparent", border: "none", fontSize: 13, cursor: "pointer", padding: 4, filter: "grayscale(0.5)" },
   addBtn: { width: "100%", padding: "8px", borderRadius: 6, border: "1px dashed #333", background: "transparent", color: "#666", fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer" },
-  editCard: { padding: 14, background: "#0a0a0a", borderRadius: 10, border: "1px solid #e91e8c44", display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 },
+  editCard: { padding: 14, background: "#0a0a0a", borderRadius: 10, border: "1px solid #1E4D8C44", display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 },
   input: { padding: "10px", background: "#141414", border: "1px solid #222", borderRadius: 6, color: "#f5f5f5", fontFamily: "'Inter', sans-serif", fontSize: 13, outline: "none", width: "100%" },
   label: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#888", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },
-  saveBtn: { padding: "8px 16px", borderRadius: 6, border: "none", background: "#e91e8c", color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer" },
+  saveBtn: { padding: "8px 16px", borderRadius: 6, border: "none", background: "#1E4D8C", color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer" },
   dimBtn: { padding: "8px 16px", borderRadius: 6, border: "1px solid #333", background: "transparent", color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500, letterSpacing: 2, cursor: "pointer" },
 };

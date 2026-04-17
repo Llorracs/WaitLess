@@ -249,7 +249,7 @@ const S = {
   },
   navLogo: {
     fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 4,
-    background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
     textDecoration: "none",
   },
   container: { maxWidth: 700, margin: "0 auto", padding: "40px 24px 60px" },

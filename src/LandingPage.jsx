@@ -227,13 +227,13 @@ export default function LandingPage() {
         <p style={S.sectionSub}>Try the live demo right now. No signup needed.</p>
 
         <div style={S.demoCards}>
-          <a href="/trfq" target="_blank" rel="noopener noreferrer" className="hover-lift" style={S.demoCard}>
+          <a href="/demo" target="_blank" rel="noopener noreferrer" className="hover-lift" style={S.demoCard}>
             <span style={S.demoIcon}>📱</span>
             <span style={S.demoLabel}>PATRON VIEW</span>
             <span style={S.demoDesc}>Browse menu, add to cart, place order</span>
             <span style={S.demoLink}>Open Demo →</span>
           </a>
-          <a href="/trfq/bartender" target="_blank" rel="noopener noreferrer" className="hover-lift" style={S.demoCard}>
+          <a href="/demo/bartender" target="_blank" rel="noopener noreferrer" className="hover-lift" style={S.demoCard}>
             <span style={S.demoIcon}>📋</span>
             <span style={S.demoLabel}>BARTENDER VIEW</span>
             <span style={S.demoDesc}>Live queue, status updates, verification</span>

@@ -1123,14 +1123,26 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       {/* CONFIRMATION */}
       {view === "confirmation" && activeOrders.length > 0 && currentOrder && (
         <div style={{ padding: "30px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 28, minHeight: "60vh", justifyContent: "center" }}>
-          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: currentOrder.status === "ready" ? 20 : 13, fontWeight: currentOrder.status === "ready" ? 700 : 600, letterSpacing: 4, color: BRAND.success, textTransform: "uppercase", textAlign: "center", transition: "all 0.5s ease" }}>
-            {currentOrder.status === "ready" ? "YOUR DRINK IS READY" : "Order Confirmed"}
+          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 20 : 13, fontWeight: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 700 : 600, letterSpacing: 4, color: currentOrder.status === "ready" ? BRAND.success : currentOrder.status === "picked_up" ? BRAND.accent : currentOrder.status === "in_progress" ? BRAND.accent : BRAND.success, textTransform: "uppercase", textAlign: "center", transition: "all 0.5s ease" }}>
+            {currentOrder.status === "ready" ? "YOUR ORDER IS READY" : currentOrder.status === "picked_up" ? "ORDER COMPLETE" : currentOrder.status === "in_progress" ? "PREPARING YOUR ORDER" : "Order Confirmed"}
           </div>
 
           {currentOrder.status === "ready" && (
             <div style={{ background: `${BRAND.success}15`, border: `1.5px solid ${BRAND.success}44`, borderRadius: 14, padding: "14px 22px", textAlign: "center", maxWidth: 300, animation: "readyFadeIn 0.5s ease" }}>
               <style>{`@keyframes readyFadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }`}</style>
-              <p style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.success, letterSpacing: 1, margin: 0 }}>Head to the bar and show your confirmation</p>
+              <p style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.success, letterSpacing: 1, margin: 0 }}>Head to the pickup area and show your badge</p>
+            </div>
+          )}
+
+          {currentOrder.status === "in_progress" && (
+            <div style={{ background: `${BRAND.accent}15`, border: `1.5px solid ${BRAND.accent}44`, borderRadius: 14, padding: "14px 22px", textAlign: "center", maxWidth: 300 }}>
+              <p style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", fontWeight: 400, color: BRAND.accent, letterSpacing: 1, margin: 0 }}>We're making your order now</p>
+            </div>
+          )}
+
+          {currentOrder.status === "picked_up" && (
+            <div style={{ background: `${BRAND.accent}15`, border: `1.5px solid ${BRAND.accent}44`, borderRadius: 14, padding: "14px 22px", textAlign: "center", maxWidth: 300 }}>
+              <p style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", fontWeight: 400, color: BRAND.accent, letterSpacing: 1, margin: 0 }}>Enjoy! Thank you for using Waitless</p>
             </div>
           )}
 

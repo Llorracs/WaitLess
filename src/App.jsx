@@ -403,13 +403,9 @@ export default function App() {
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
-      ) : isKitchen ? (
+      ) : isKitchen || (isDemo && demoView === "kitchen") ? (
         <KitchenDisplay venue={venue} BRAND={BRAND} />
       ) : (isDemo ? demoView === "bartender" : isBartender) ? (
-        <BartenderView venue={venue} BRAND={BRAND} />
-      ) : (isDemo && demoView === "kitchen") ? (
-        <KitchenDisplay venue={venue} BRAND={BRAND} />
-      ) : (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
         <PatronView venue={venue} menu={menu} BRAND={BRAND} />

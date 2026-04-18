@@ -650,9 +650,9 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   // Demo mode: no Square credentials → skip payment entirely
   const isDemoMode = !venue.square_app_id || !venue.square_location_id;
 
-  const handleCheckout = async () => {
+  const handleCheckout = async (skipAgeCheck = false) => {
     // Check if age verification is needed before proceeding
-    if (needsAgeCheck) {
+    if (!skipAgeCheck && needsAgeCheck) {
       setShowAgeVerification(true);
       return;
     }
@@ -822,8 +822,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                   setAgeVerified(true);
                   // Store verification in session
                   sessionStorage.setItem(`age_verified_${venue.id}`, "true");
-                  // Proceed to checkout
-                  setTimeout(() => handleCheckout(), 100);
+                  // Proceed to checkout — skip age check since we just verified
+                  setTimeout(() => handleCheckout(true), 100);
                 }}
                 style={{ padding: "16px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 12, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}
               >

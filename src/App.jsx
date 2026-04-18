@@ -748,8 +748,13 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const isDemoMode = !venue.square_app_id || !venue.square_location_id;
 
   const handleCheckout = async (skipAgeCheck = false) => {
+    // Defensive: only an explicit boolean `true` skips the gate. This prevents
+    // callers that accidentally pass a truthy non-boolean (like a React synthetic
+    // event from onClick={handleCheckout}) from bypassing age verification.
+    const shouldSkip = skipAgeCheck === true;
+
     // Check if age verification is needed before proceeding
-    if (!skipAgeCheck && needsAgeCheck) {
+    if (!shouldSkip && needsAgeCheck) {
       setShowAgeVerification(true);
       return;
     }
@@ -1198,7 +1203,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                 </div>
               )}
 
-              <button onClick={handleCheckout} style={{ width: "100%", padding: "18px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 14, color: BRAND.white, fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 3, cursor: "pointer", boxShadow: `0 4px 30px ${BRAND.primaryGlow}` }}>
+              <button onClick={() => handleCheckout(false)} style={{ width: "100%", padding: "18px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 14, color: BRAND.white, fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 3, cursor: "pointer", boxShadow: `0 4px 30px ${BRAND.primaryGlow}` }}>
                 {isDemoMode ? `DEMO PAY $${(totalCents / 100).toFixed(2)}` : `PAY $${(totalCents / 100).toFixed(2)}`}
               </button>
               <p style={{ textAlign: "center", fontSize: 10, color: BRAND.dimText, marginTop: 10, fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>{isDemoMode ? "DEMO — NO CHARGE" : "SECURE PAYMENT VIA SQUARE"}</p>

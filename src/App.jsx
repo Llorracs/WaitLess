@@ -30,6 +30,7 @@ import {
   startMakingOrder,
   markOrderReady,
   markOrderPickedUp,
+  markItemReady,
   supabase,
 } from "./lib/barOrderService";
 import AgeVerification, { isAgeVerified } from "./AgeVerification";
@@ -48,6 +49,7 @@ function getRouteFromUrl() {
   const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
   const parts = path.split("/");
   const slug = parts[0] || null;
+  const isManager = parts[1] === "manager";
   const isBartender = parts[1] === "bartender";
   const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
@@ -57,7 +59,7 @@ function getRouteFromUrl() {
   const isOAuthComplete = parts[0] === "oauth-complete";
   const isPrivacy = parts[0] === "privacy";
   const isTerms = parts[0] === "terms";
-  return { slug, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
+  return { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
 }
 
 // ============================================
@@ -222,11 +224,14 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
   const [demoView, setDemoView] = useState("patron");
-  const { slug, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+  const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
+  const { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
 
   // Set demo view based on URL on mount
   useEffect(() => {
+    if (isManager) setDemoView("manager");
     if (isBartender) setDemoView("bartender");
+    if (isKitchen) setDemoView("kitchen");
   }, []);
 
   // OAuth redirect handler
@@ -336,7 +341,7 @@ export default function App() {
   }
 
   // Age verification gate (patron view only — not bartender, QR, or admin)
-  const needsAgeVerification = !isBartender && !isKitchen && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
+  const needsAgeVerification = !isManager && !isBartender && !isKitchen && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
 
   const isDemo = slug === "demo";
 
@@ -355,43 +360,27 @@ export default function App() {
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#D4A843" }} />
             <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#D4A843", letterSpacing: 2 }}>WAITLESS DEMO</span>
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            <button
-              onClick={() => setDemoView("patron")}
-              style={{
-                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
-                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
-                border: demoView === "patron" ? "1px solid #D4A843" : "1px solid #333",
-                background: demoView === "patron" ? "#D4A84322" : "transparent",
-                color: demoView === "patron" ? "#D4A843" : "#666",
-              }}
-            >
-              PATRON VIEW
-            </button>
-            <button
-              onClick={() => setDemoView("bartender")}
-              style={{
-                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
-                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
-                border: demoView === "bartender" ? "1px solid #1E4D8C" : "1px solid #333",
-                background: demoView === "bartender" ? "#1E4D8C22" : "transparent",
-                color: demoView === "bartender" ? "#1E4D8C" : "#666",
-              }}
-            >
-              BARTENDER VIEW
-            </button>
-            <button
-              onClick={() => setDemoView("kitchen")}
-              style={{
-                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
-                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
-                border: demoView === "kitchen" ? "1px solid #2ecc71" : "1px solid #333",
-                background: demoView === "kitchen" ? "#2ecc7122" : "transparent",
-                color: demoView === "kitchen" ? "#2ecc71" : "#666",
-              }}
-            >
-              KITCHEN VIEW
-            </button>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { key: "patron", label: "PATRON", color: "#D4A843" },
+              { key: "manager", label: "MANAGER", color: "#1E4D8C" },
+              { key: "bartender", label: "BAR", color: "#e91e8c" },
+              { key: "kitchen", label: "KITCHEN", color: "#2ecc71" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setDemoView(tab.key)}
+                style={{
+                  padding: "5px 14px", borderRadius: 14, cursor: "pointer",
+                  fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+                  border: demoView === tab.key ? `1px solid ${tab.color}` : "1px solid #333",
+                  background: demoView === tab.key ? tab.color + "22" : "transparent",
+                  color: demoView === tab.key ? tab.color : "#666",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
       )}
@@ -404,11 +393,13 @@ export default function App() {
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
       ) : isKitchen || (isDemo && demoView === "kitchen") ? (
-        <KitchenDisplay venue={venue} BRAND={BRAND} />
-      ) : (isDemo ? demoView === "bartender" : isBartender) ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} stationFilter="kitchen" />
+      ) : isBartender || (isDemo && demoView === "bartender") ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} stationFilter="bar" />
+      ) : isManager || (isDemo && demoView === "manager") ? (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
-        <PatronView venue={venue} menu={menu} BRAND={BRAND} />
+        <PatronView venue={venue} menu={menu} BRAND={BRAND} demoOrders={isDemo ? demoOrders : null} setDemoOrders={isDemo ? setDemoOrders : null} />
       )}
     </div>
   );
@@ -418,11 +409,15 @@ export default function App() {
 // PATRON VIEW
 // ============================================
 
-function PatronView({ venue, menu, BRAND }) {
+function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const [cart, setCart] = useState([]);
-  const [view, setView] = useState("menu"); // menu | cart | payment | processing | confirmation
+  const [view, setView] = useState(() => {
+    // If returning to patron view with existing demo orders, show confirmation
+    if (demoOrders && demoOrders.length > 0) return "confirmation";
+    return "menu";
+  });
   const [processingStep, setProcessingStep] = useState("");
-  const [activeOrders, setActiveOrders] = useState([]); // All active orders for this patron
+  const [activeOrders, setActiveOrders] = useState(demoOrders || []); // Restore from demo state if available
   const [activeOrderIndex, setActiveOrderIndex] = useState(0); // Which badge is showing
   const [tipPercent, setTipPercent] = useState(0); // 0, 15, 18, 20, or custom
   const [customTip, setCustomTip] = useState("");
@@ -430,6 +425,13 @@ function PatronView({ venue, menu, BRAND }) {
   const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
   const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
   const [specialInstructions, setSpecialInstructions] = useState(""); // Order-level notes
+
+  // Sync active orders back to parent demo state when they change
+  useEffect(() => {
+    if (setDemoOrders && activeOrders.length > 0) {
+      setDemoOrders(activeOrders);
+    }
+  }, [activeOrders]);
 
   // Modifier modal state
   const [modifierModal, setModifierModal] = useState(null); // { item, modifiers, selectedMods, notes }
@@ -618,6 +620,7 @@ function PatronView({ venue, menu, BRAND }) {
           price: (i.price_cents + (i.extraCents || 0)) / 100,
           modifiers: i.modifiers || [],
           notes: i.itemNotes || "",
+          station: i.station || "all",
         })),
         subtotalCents,
         feeCents: feeCents + tipCents,
@@ -1298,29 +1301,40 @@ function BartenderView({ venue, BRAND }) {
                 <div style={{ padding: "5px 12px", borderRadius: 20, background: config.accent + "22", border: `1px solid ${config.accent}44`, fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: config.accent, letterSpacing: 2 }}>{config.label}</div>
               </div>
 
-              {/* Items with modifiers */}
-              {(order.items || []).map((item, idx) => (
-                <div key={idx}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.white, letterSpacing: 0.5 }}>{item.name}</span>
-                    <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+              {/* Items with modifiers and station status */}
+              {(order.items || []).map((item, idx) => {
+                const itemStatus = order.item_statuses?.[idx] || (order.status === "pending" ? "pending" : "pending");
+                const isItemReady = itemStatus === "ready";
+                return (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {/* Item ready indicator */}
+                    {order.status === "in_progress" && (
+                      <span style={{ fontSize: 10, color: isItemReady ? BRAND.success : "#444" }}>{isItemReady ? "✓" : "○"}</span>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: isItemReady ? BRAND.success : BRAND.white, letterSpacing: 0.5, textDecoration: isItemReady ? "line-through" : "none" }}>{item.name}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {item.station && item.station !== "all" && (
+                            <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "1px 5px", borderRadius: 3, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115" }}>{item.station === "bar" ? "BAR" : "KIT"}</span>
+                          )}
+                          <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+                        </div>
+                      </div>
+                      {item.modifiers && item.modifiers.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, marginLeft: 8 }}>
+                          {item.modifiers.map((m, mi) => (
+                            <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, padding: "2px 6px", background: BRAND.primary + "15", borderRadius: 4 }}>{m.option}</span>
+                          ))}
+                        </div>
+                      )}
+                      {item.notes && (
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.accent, marginTop: 3, marginLeft: 8, fontStyle: "italic" }}>"{item.notes}"</div>
+                      )}
+                    </div>
                   </div>
-                  {item.modifiers && item.modifiers.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, marginLeft: 8 }}>
-                      {item.modifiers.map((m, mi) => (
-                        <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, padding: "2px 6px", background: BRAND.primary + "15", borderRadius: 4 }}>
-                          {m.option}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {item.notes && (
-                    <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.accent, marginTop: 3, marginLeft: 8, fontStyle: "italic" }}>
-                      "{item.notes}"
-                    </div>
-                  )}
-                </div>
-              ))}
+                );
+              })}
 
               {/* Order-level special instructions */}
               {order.special_instructions && (
@@ -1413,29 +1427,33 @@ function BartenderView({ venue, BRAND }) {
 // ============================================
 // KITCHEN DISPLAY (read-only, large text)
 // ============================================
-function KitchenDisplay({ venue, BRAND }) {
+function KitchenDisplay({ venue, BRAND, stationFilter }) {
   const [orders, setOrders] = useState([]);
+  const isBar = stationFilter === "bar";
+  const displayLabel = isBar ? "BAR DISPLAY" : "KITCHEN DISPLAY";
+  const accentColor = isBar ? "#e91e8c" : "#2ecc71";
 
   useEffect(() => {
     const unsub = subscribeToBartenderQueue(venue.id, setOrders);
     return () => unsub();
   }, [venue.id]);
 
-  // Only show orders that need to be made (pending + in_progress)
-  const activeOrders = orders
-    .filter((o) => o.status === "pending" || o.status === "in_progress")
-    .sort((a, b) => {
-      const p = { pending: 0, in_progress: 1 };
-      if (p[a.status] !== p[b.status]) return p[a.status] - p[b.status];
-      return new Date(a.ordered_at) - new Date(b.ordered_at);
-    });
-
-  const readyOrders = orders.filter((o) => o.status === "ready");
-
-  const statusColors = {
-    pending: { bg: "#1a0a00", border: "#d4a84366", label: "QUEUED", color: "#d4a843" },
-    in_progress: { bg: "#0a1a0a", border: "#2ecc7166", label: "MAKING", color: "#2ecc71" },
-  };
+  // Filter orders to only those that have items for this station
+  const filteredOrders = orders
+    .filter((o) => o.status === "in_progress")
+    .map((order) => {
+      // Find which items belong to this station
+      const stationItems = (order.items || []).map((item, idx) => ({ ...item, _idx: idx }))
+        .filter((item) => {
+          if (!stationFilter || stationFilter === "all") return true;
+          const itemStation = item.station || "all";
+          return itemStation === stationFilter || itemStation === "all";
+        });
+      if (stationItems.length === 0) return null;
+      return { ...order, stationItems };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(a.ordered_at) - new Date(b.ordered_at));
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", padding: 16 }}>
@@ -1443,16 +1461,16 @@ function KitchenDisplay({ venue, BRAND }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "10px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>
         <div>
           <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 3, color: "#f5f5f5" }}>{venue.name?.toUpperCase()}</span>
-          <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#2ecc71", letterSpacing: 2 }}>KITCHEN DISPLAY</span>
+          <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: accentColor, letterSpacing: 2 }}>{displayLabel}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 28, fontWeight: 700, color: "#d4a843" }}>{activeOrders.length}</span>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 28, fontWeight: 700, color: "#d4a843" }}>{filteredOrders.length}</span>
           <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#888", letterSpacing: 1 }}>ORDERS<br/>IN QUEUE</span>
         </div>
       </div>
 
       {/* Orders grid */}
-      {activeOrders.length === 0 ? (
+      {filteredOrders.length === 0 ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
           <div style={{ textAlign: "center" }}>
             <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700, color: "#333", letterSpacing: 4 }}>ALL CLEAR</span>
@@ -1461,75 +1479,101 @@ function KitchenDisplay({ venue, BRAND }) {
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
-          {activeOrders.map((order) => {
-            const sc = statusColors[order.status];
-            return (
-              <div key={order.id} style={{
-                background: sc.bg, borderRadius: 14, border: `2px solid ${sc.border}`,
-                padding: 16, display: "flex", flexDirection: "column", gap: 10,
-                animation: order.status === "pending" ? "pulse 2s infinite" : "none",
-              }}>
-                {/* Order header */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{
-                      width: 48, height: 48, borderRadius: 10,
-                      backgroundColor: order.confirm_hex, display: "flex",
-                      alignItems: "center", justifyContent: "center",
-                    }}>
-                      <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, color: "#fff" }}>{order.confirm_letter}</span>
-                    </div>
-                    <div>
-                      <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, color: sc.color }}>{sc.label}</span>
-                      <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
-                        {order.confirm_color} {order.confirm_letter}
-                      </span>
-                    </div>
+          {filteredOrders.map((order) => (
+            <div key={order.id} style={{
+              background: "#0a0a0a", borderRadius: 14, border: `2px solid ${accentColor}44`,
+              padding: 16, display: "flex", flexDirection: "column", gap: 10,
+            }}>
+              {/* Order header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 10,
+                    backgroundColor: order.confirm_hex, display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                  }}>
+                    <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, color: "#fff" }}>{order.confirm_letter}</span>
                   </div>
-                  <WaitTimer since={order.ordered_at} />
-                </div>
-
-                {/* Items — BIG TEXT */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {(order.items || []).map((item, idx) => (
-                    <div key={idx}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                        <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600, color: "#f5f5f5", letterSpacing: 1 }}>{item.name}</span>
-                        <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, color: "#d4a843" }}>x{item.qty}</span>
-                      </div>
-                      {item.modifiers && item.modifiers.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2, marginLeft: 4 }}>
-                          {item.modifiers.map((m, mi) => (
-                            <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#000", padding: "3px 10px", background: "#d4a843", borderRadius: 6 }}>{m.option}</span>
-                          ))}
-                        </div>
-                      )}
-                      {item.notes && (
-                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e74c3c", marginTop: 2, marginLeft: 4 }}>
-                          {item.notes}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-
-                {/* Order-level special instructions */}
-                {order.special_instructions && (
-                  <div style={{ padding: "10px 12px", background: "#e74c3c22", borderRadius: 8, border: "2px solid #e74c3c66" }}>
-                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e74c3c", letterSpacing: 2 }}>NOTE: </span>
-                    <span style={{ display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, color: "#f5f5f5", marginTop: 2 }}>{order.special_instructions}</span>
+                  <div>
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+                      {order.confirm_color} {order.confirm_letter}
+                    </span>
                   </div>
-                )}
+                </div>
+                <WaitTimer since={order.ordered_at} />
               </div>
-            );
-          })}
-        </div>
-      )}
 
-      {/* Ready count bar at bottom */}
-      {readyOrders.length > 0 && (
-        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "10px 20px", background: "#0a1a0a", borderTop: "2px solid #2ecc7166", display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#2ecc71", letterSpacing: 2 }}>{readyOrders.length} ORDER{readyOrders.length !== 1 ? "S" : ""} READY FOR PICKUP</span>
+              {/* Station items — BIG TEXT with per-item READY */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {order.stationItems.map((item) => {
+                  const itemStatus = order.item_statuses?.[item._idx] || "pending";
+                  const isItemReady = itemStatus === "ready";
+
+                  return (
+                    <div key={item._idx} style={{
+                      padding: "10px 12px", borderRadius: 8,
+                      background: isItemReady ? "#2ecc7115" : "#141414",
+                      border: isItemReady ? "1px solid #2ecc7133" : "1px solid #1a1a1a",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                            <span style={{
+                              fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600,
+                              color: isItemReady ? "#2ecc71" : "#f5f5f5", letterSpacing: 1,
+                              textDecoration: isItemReady ? "line-through" : "none",
+                            }}>{item.name}</span>
+                            <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, color: "#d4a843" }}>x{item.qty}</span>
+                          </div>
+                          {item.modifiers && item.modifiers.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                              {item.modifiers.map((m, mi) => (
+                                <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#000", padding: "3px 10px", background: "#d4a843", borderRadius: 6 }}>{m.option}</span>
+                              ))}
+                            </div>
+                          )}
+                          {item.notes && (
+                            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e74c3c", marginTop: 4 }}>{item.notes}</div>
+                          )}
+                        </div>
+
+                        {/* Per-item READY button */}
+                        {!isItemReady && (
+                          <button
+                            onClick={async () => {
+                              const allDone = await markItemReady(order.id, item._idx);
+                              if (allDone) {
+                                fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {});
+                              }
+                            }}
+                            style={{
+                              marginLeft: 10, padding: "10px 20px", borderRadius: 8, border: "none",
+                              background: "#2ecc71", color: "#000",
+                              fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700,
+                              letterSpacing: 2, cursor: "pointer", whiteSpace: "nowrap",
+                            }}
+                          >
+                            READY
+                          </button>
+                        )}
+                        {isItemReady && (
+                          <span style={{ marginLeft: 10, fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#2ecc71", letterSpacing: 2 }}>DONE</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Order-level special instructions */}
+              {order.special_instructions && (
+                <div style={{ padding: "10px 12px", background: "#e74c3c22", borderRadius: 8, border: "2px solid #e74c3c66" }}>
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e74c3c", letterSpacing: 2 }}>NOTE: </span>
+                  <span style={{ display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, color: "#f5f5f5", marginTop: 2 }}>{order.special_instructions}</span>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       )}
 

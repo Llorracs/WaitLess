@@ -59,9 +59,9 @@ function MasterMenuBuilder({ venue, onBack }) {
 
   const handleSave = async (item) => {
     if (item.id) {
-      await supabase.from("menus").update({ item_name: item.item_name, description: item.description, price_cents: item.price_cents, category: item.category, sort_order: item.sort_order, active: item.active }).eq("id", item.id);
+      await supabase.from("menus").update({ item_name: item.item_name, description: item.description, price_cents: item.price_cents, category: item.category, sort_order: item.sort_order, active: item.active, station: item.station || "all" }).eq("id", item.id);
     } else {
-      await supabase.from("menus").insert({ venue_id: venue.id, item_name: item.item_name, description: item.description || "", price_cents: item.price_cents, category: item.category, sort_order: item.sort_order || 0, active: true });
+      await supabase.from("menus").insert({ venue_id: venue.id, item_name: item.item_name, description: item.description || "", price_cents: item.price_cents, category: item.category, sort_order: item.sort_order || 0, active: true, station: item.station || "all" });
     }
     await loadMenu(); setEditingItem(null); setNewItem(null); flash("Saved");
   };
@@ -217,6 +217,14 @@ function MasterMenuBuilder({ venue, onBack }) {
                   <input type="number" step="0.01" value={(editingItem.price_cents / 100).toFixed(2)} onChange={(e) => setEditingItem({ ...editingItem, price_cents: Math.round(parseFloat(e.target.value || 0) * 100) })} style={{ ...MS.input, flex: 1 }} />
                   <input type="number" value={editingItem.sort_order} onChange={(e) => setEditingItem({ ...editingItem, sort_order: parseInt(e.target.value || 0) })} style={{ ...MS.input, width: 60 }} />
                 </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <label style={{ fontSize: 9, color: "#888", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>STATION:</label>
+                  <select value={editingItem.station || "all"} onChange={(e) => setEditingItem({ ...editingItem, station: e.target.value })} style={{ ...MS.input, width: 100, padding: "6px 8px", fontSize: 12 }}>
+                    <option value="all">All</option>
+                    <option value="bar">Bar</option>
+                    <option value="kitchen">Kitchen</option>
+                  </select>
+                </div>
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                   <button onClick={() => setEditingItem(null)} style={MS.dimBtn}>CANCEL</button>
                   <button onClick={() => handleSave(editingItem)} style={MS.saveBtn}>SAVE</button>
@@ -228,6 +236,9 @@ function MasterMenuBuilder({ venue, onBack }) {
                   <span style={MS.itemName}>{item.item_name}</span>
                   {item.description && <span style={MS.itemDesc}>{item.description}</span>}
                 </div>
+                {item.station && item.station !== "all" && (
+                  <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "2px 6px", borderRadius: 4, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115", border: `1px solid ${item.station === "bar" ? "#e91e8c33" : "#2ecc7133"}` }}>{item.station === "bar" ? "BAR" : "KITCHEN"}</span>
+                )}
                 <span style={MS.itemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
                 <button onClick={() => { setModifierItemId(item.id); loadModifiers(item.id); }} style={{ ...MS.iconBtn, fontSize: 9, fontFamily: "'Space Mono', monospace", color: "#d4a843", border: "1px solid #d4a84333", borderRadius: 4, padding: "2px 6px" }}>MODS</button>
                 <button onClick={() => handleToggle(item)} style={MS.iconBtn}>{item.active ? "👁" : "🚫"}</button>

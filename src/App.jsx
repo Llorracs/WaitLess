@@ -1358,7 +1358,13 @@ function BartenderView({ venue, BRAND }) {
                   <button onClick={() => startMakingOrder(order.id)} style={{ flex: 1, padding: "13px", background: BRAND.accent, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>START MAKING</button>
                 )}
                 {order.status === "in_progress" && (
-                  <button onClick={async () => { await markOrderReady(order.id); fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {}); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>DRINK READY</button>
+                  <button onClick={async () => {
+                    // Mark all items as ready
+                    const allStatuses = {};
+                    (order.items || []).forEach((_, idx) => { allStatuses[idx] = "ready"; });
+                    await supabase.from("bar_orders").update({ item_statuses: allStatuses, status: "ready", ready_at: new Date().toISOString() }).eq("id", order.id);
+                    fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {});
+                  }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>ORDER READY</button>
                 )}
                 {order.status === "ready" && (
                   <button onClick={() => setVerifyOrder(order)} style={{ flex: 1, padding: "13px", background: "transparent", border: `1.5px solid ${BRAND.success}`, borderRadius: 10, color: BRAND.success, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>VERIFY & HAND OFF</button>

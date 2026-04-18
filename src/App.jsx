@@ -214,6 +214,82 @@ function WaitTimer({ since }) {
   );
 }
 
+function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
+  const [queueInfo, setQueueInfo] = useState({ position: 0, avgMinutes: 0, estimateMinutes: 0 });
+
+  useEffect(() => {
+    async function calcEstimate() {
+      try {
+        // Get all active orders ahead of this one
+        const { data: activeOrders } = await supabase
+          .from("bar_orders")
+          .select("id, ordered_at")
+          .eq("venue_id", venueId)
+          .in("status", ["pending", "in_progress"])
+          .lt("ordered_at", orderedAt)
+          .order("ordered_at", { ascending: true });
+
+        const position = (activeOrders?.length || 0) + 1;
+
+        // Get average make time from last 20 completed orders
+        const { data: recentOrders } = await supabase
+          .from("bar_orders")
+          .select("ordered_at, ready_at")
+          .eq("venue_id", venueId)
+          .eq("status", "picked_up")
+          .not("ready_at", "is", null)
+          .order("ready_at", { ascending: false })
+          .limit(20);
+
+        let avgMinutes = 5; // Default estimate
+        if (recentOrders && recentOrders.length >= 3) {
+          const makeTimes = recentOrders.map((o) => {
+            const start = new Date(o.ordered_at).getTime();
+            const end = new Date(o.ready_at).getTime();
+            return (end - start) / 1000 / 60; // minutes
+          }).filter((t) => t > 0 && t < 60); // Filter outliers
+
+          if (makeTimes.length > 0) {
+            avgMinutes = Math.round(makeTimes.reduce((a, b) => a + b, 0) / makeTimes.length);
+          }
+        }
+
+        const estimateMinutes = Math.max(1, Math.round(avgMinutes * position / 2)); // Parallel processing factor
+
+        setQueueInfo({ position, avgMinutes, estimateMinutes });
+      } catch (err) {
+        console.error("Queue estimate error:", err);
+      }
+    }
+
+    calcEstimate();
+    const interval = setInterval(calcEstimate, 15000); // Refresh every 15 seconds
+    return () => clearInterval(interval);
+  }, [venueId, orderId, orderedAt]);
+
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+      padding: "14px 20px", background: "#141414", borderRadius: 12, border: "1px solid #222",
+      maxWidth: 280, width: "100%",
+    }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700, color: BRAND.accent }}>
+          ~{queueInfo.estimateMinutes}
+        </span>
+        <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: BRAND.gray, letterSpacing: 1 }}>MIN</span>
+      </div>
+      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.dimText, letterSpacing: 1 }}>
+        ESTIMATED WAIT
+      </span>
+      <div style={{ width: "100%", height: 1, background: "#222", margin: "4px 0" }} />
+      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: BRAND.gray }}>
+        {queueInfo.position === 1 ? "You're next!" : `${queueInfo.position - 1} order${queueInfo.position - 1 !== 1 ? "s" : ""} ahead of you`}
+      </span>
+    </div>
+  );
+}
+
 // ============================================
 // MAIN APP
 // ============================================
@@ -1064,6 +1140,11 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             timestamp={new Date(currentOrder.ordered_at).getTime()}
             drinkReady={currentOrder.status === "ready"}
           />
+
+          {/* Queue estimate — only show when order is not ready */}
+          {currentOrder.status !== "ready" && currentOrder.status !== "picked_up" && (
+            <QueueEstimate venueId={venue.id} orderId={currentOrder.id} orderedAt={currentOrder.ordered_at} BRAND={BRAND} />
+          )}
 
           {/* Order items for current badge */}
           <div style={{ maxWidth: 280, width: "100%" }}>

@@ -49,6 +49,7 @@ function getRouteFromUrl() {
   const parts = path.split("/");
   const slug = parts[0] || null;
   const isBartender = parts[1] === "bartender";
+  const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
   const isSignup = parts[0] === "admin" && parts[1] === "signup";
@@ -56,7 +57,7 @@ function getRouteFromUrl() {
   const isOAuthComplete = parts[0] === "oauth-complete";
   const isPrivacy = parts[0] === "privacy";
   const isTerms = parts[0] === "terms";
-  return { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
+  return { slug, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
 }
 
 // ============================================
@@ -221,7 +222,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
   const [demoView, setDemoView] = useState("patron");
-  const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+  const { slug, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
 
   // Set demo view based on URL on mount
   useEffect(() => {
@@ -335,7 +336,7 @@ export default function App() {
   }
 
   // Age verification gate (patron view only — not bartender, QR, or admin)
-  const needsAgeVerification = !isBartender && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
+  const needsAgeVerification = !isBartender && !isKitchen && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
 
   const isDemo = slug === "demo";
 
@@ -379,6 +380,18 @@ export default function App() {
             >
               BARTENDER VIEW
             </button>
+            <button
+              onClick={() => setDemoView("kitchen")}
+              style={{
+                padding: "5px 14px", borderRadius: 14, cursor: "pointer",
+                fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+                border: demoView === "kitchen" ? "1px solid #2ecc71" : "1px solid #333",
+                background: demoView === "kitchen" ? "#2ecc7122" : "transparent",
+                color: demoView === "kitchen" ? "#2ecc71" : "#666",
+              }}
+            >
+              KITCHEN VIEW
+            </button>
           </div>
         </div>
       )}
@@ -390,7 +403,13 @@ export default function App() {
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
+      ) : isKitchen ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} />
       ) : (isDemo ? demoView === "bartender" : isBartender) ? (
+        <BartenderView venue={venue} BRAND={BRAND} />
+      ) : (isDemo && demoView === "kitchen") ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} />
+      ) : (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
         <PatronView venue={venue} menu={menu} BRAND={BRAND} />
@@ -1381,13 +1400,144 @@ function BartenderView({ venue, BRAND }) {
 
             <p style={{ fontSize: 13, color: BRAND.gray, textAlign: "center", lineHeight: 1.5, margin: 0 }}>Match this to the patron's phone before handing off.</p>
 
-            <div style={{ display: "flex", gap: 10, width: "100%" }}>
-              <button onClick={() => setVerifyOrder(null)} style={{ flex: 1, padding: "13px", background: "transparent", border: "1px solid #444", borderRadius: 10, color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>CANCEL</button>
-              <button onClick={() => { markOrderPickedUp(verifyOrder.id); setVerifyOrder(null); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>CONFIRM</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setVerifyOrder(null)} style={{ flex: 1, padding: "13px", background: "transparent", border: "1px solid #444", borderRadius: 10, color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>CANCEL</button>
+                <button onClick={() => { markOrderPickedUp(verifyOrder.id); setVerifyOrder(null); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>CONFIRM</button>
+              </div>
+              <button onClick={async () => { await supabase.from("bar_orders").update({ status: "in_progress", ready_at: null }).eq("id", verifyOrder.id); setVerifyOrder(null); }} style={{ width: "100%", padding: "11px", background: "#e74c3c22", border: "1px solid #e74c3c44", borderRadius: 10, color: "#e74c3c", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>SEND BACK — REMAKE</button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================
+// KITCHEN DISPLAY (read-only, large text)
+// ============================================
+function KitchenDisplay({ venue, BRAND }) {
+  const [orders, setOrders] = useState([]);
+
+  useEffect(() => {
+    const unsub = subscribeToBartenderQueue(venue.id, setOrders);
+    return () => unsub();
+  }, [venue.id]);
+
+  // Only show orders that need to be made (pending + in_progress)
+  const activeOrders = orders
+    .filter((o) => o.status === "pending" || o.status === "in_progress")
+    .sort((a, b) => {
+      const p = { pending: 0, in_progress: 1 };
+      if (p[a.status] !== p[b.status]) return p[a.status] - p[b.status];
+      return new Date(a.ordered_at) - new Date(b.ordered_at);
+    });
+
+  const readyOrders = orders.filter((o) => o.status === "ready");
+
+  const statusColors = {
+    pending: { bg: "#1a0a00", border: "#d4a84366", label: "QUEUED", color: "#d4a843" },
+    in_progress: { bg: "#0a1a0a", border: "#2ecc7166", label: "MAKING", color: "#2ecc71" },
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#000", padding: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "10px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>
+        <div>
+          <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 3, color: "#f5f5f5" }}>{venue.name?.toUpperCase()}</span>
+          <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#2ecc71", letterSpacing: 2 }}>KITCHEN DISPLAY</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 28, fontWeight: 700, color: "#d4a843" }}>{activeOrders.length}</span>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#888", letterSpacing: 1 }}>ORDERS<br/>IN QUEUE</span>
+        </div>
+      </div>
+
+      {/* Orders grid */}
+      {activeOrders.length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+          <div style={{ textAlign: "center" }}>
+            <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700, color: "#333", letterSpacing: 4 }}>ALL CLEAR</span>
+            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#444", marginTop: 8, letterSpacing: 2 }}>NO ORDERS IN QUEUE</p>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+          {activeOrders.map((order) => {
+            const sc = statusColors[order.status];
+            return (
+              <div key={order.id} style={{
+                background: sc.bg, borderRadius: 14, border: `2px solid ${sc.border}`,
+                padding: 16, display: "flex", flexDirection: "column", gap: 10,
+                animation: order.status === "pending" ? "pulse 2s infinite" : "none",
+              }}>
+                {/* Order header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{
+                      width: 48, height: 48, borderRadius: 10,
+                      backgroundColor: order.confirm_hex, display: "flex",
+                      alignItems: "center", justifyContent: "center",
+                    }}>
+                      <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, color: "#fff" }}>{order.confirm_letter}</span>
+                    </div>
+                    <div>
+                      <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, color: sc.color }}>{sc.label}</span>
+                      <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+                        {order.confirm_color} {order.confirm_letter}
+                      </span>
+                    </div>
+                  </div>
+                  <WaitTimer since={order.ordered_at} />
+                </div>
+
+                {/* Items — BIG TEXT */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {(order.items || []).map((item, idx) => (
+                    <div key={idx}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                        <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600, color: "#f5f5f5", letterSpacing: 1 }}>{item.name}</span>
+                        <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, color: "#d4a843" }}>x{item.qty}</span>
+                      </div>
+                      {item.modifiers && item.modifiers.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2, marginLeft: 4 }}>
+                          {item.modifiers.map((m, mi) => (
+                            <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#000", padding: "3px 10px", background: "#d4a843", borderRadius: 6 }}>{m.option}</span>
+                          ))}
+                        </div>
+                      )}
+                      {item.notes && (
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e74c3c", marginTop: 2, marginLeft: 4 }}>
+                          {item.notes}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Order-level special instructions */}
+                {order.special_instructions && (
+                  <div style={{ padding: "10px 12px", background: "#e74c3c22", borderRadius: 8, border: "2px solid #e74c3c66" }}>
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e74c3c", letterSpacing: 2 }}>NOTE: </span>
+                    <span style={{ display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, color: "#f5f5f5", marginTop: 2 }}>{order.special_instructions}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Ready count bar at bottom */}
+      {readyOrders.length > 0 && (
+        <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "10px 20px", background: "#0a1a0a", borderTop: "2px solid #2ecc7166", display: "flex", justifyContent: "center", alignItems: "center", gap: 8 }}>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#2ecc71", letterSpacing: 2 }}>{readyOrders.length} ORDER{readyOrders.length !== 1 ? "S" : ""} READY FOR PICKUP</span>
+        </div>
+      )}
+
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }`}</style>
     </div>
   );
 }

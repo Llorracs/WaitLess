@@ -297,11 +297,25 @@ export async function fetchActiveOrders(venueId) {
  * (Order ID is globally unique, so no venue scoping needed on updates)
  */
 export async function startMakingOrder(orderId) {
+  // First get the order to initialize item_statuses
+  const { data: order } = await supabase
+    .from('bar_orders')
+    .select('items')
+    .eq('id', orderId)
+    .single();
+
+  // Initialize all items as "pending"
+  const itemStatuses = {};
+  if (order?.items) {
+    order.items.forEach((_, idx) => { itemStatuses[idx] = "pending"; });
+  }
+
   const { error } = await supabase
     .from('bar_orders')
     .update({
       status: 'in_progress',
       started_at: new Date().toISOString(),
+      item_statuses: itemStatuses,
     })
     .eq('id', orderId);
 
@@ -318,6 +332,53 @@ export async function markOrderReady(orderId) {
     .eq('id', orderId);
 
   if (error) throw error;
+}
+
+/**
+ * Mark a specific item within an order as ready.
+ * If all items are ready, auto-mark the whole order as ready.
+ * 
+ * @param {string} orderId - The order UUID
+ * @param {number} itemIndex - The index of the item in the items array
+ */
+export async function markItemReady(orderId, itemIndex) {
+  // Get current order
+  const { data: order } = await supabase
+    .from('bar_orders')
+    .select('items, item_statuses')
+    .eq('id', orderId)
+    .single();
+
+  if (!order) throw new Error("Order not found");
+
+  // Update the specific item's status
+  const newStatuses = { ...(order.item_statuses || {}) };
+  newStatuses[itemIndex] = "ready";
+
+  // Check if ALL items are now ready
+  const allReady = order.items.every((_, idx) => newStatuses[idx] === "ready");
+
+  if (allReady) {
+    // All items done — mark entire order as ready
+    const { error } = await supabase
+      .from('bar_orders')
+      .update({
+        item_statuses: newStatuses,
+        status: 'ready',
+        ready_at: new Date().toISOString(),
+      })
+      .eq('id', orderId);
+    if (error) throw error;
+  } else {
+    // Some items still pending — just update item_statuses
+    const { error } = await supabase
+      .from('bar_orders')
+      .update({ item_statuses: newStatuses })
+      .eq('id', orderId);
+    if (error) throw error;
+  }
+
+  return allReady;
 }
 
 export async function markOrderPickedUp(orderId) {

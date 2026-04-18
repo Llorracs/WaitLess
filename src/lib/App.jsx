@@ -21,6 +21,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   getVenueBySlug,
   getVenueMenu,
+  getMenuItemModifiers,
   verifyBartenderPin,
   generateUniqueConfirmation,
   createBarOrder,
@@ -29,6 +30,7 @@ import {
   startMakingOrder,
   markOrderReady,
   markOrderPickedUp,
+  markItemReady,
   supabase,
 } from "./lib/barOrderService";
 import AgeVerification, { isAgeVerified } from "./AgeVerification";
@@ -37,6 +39,8 @@ import QRGenerator from "./QRGenerator";
 import AdminView from "./AdminView";
 import OnboardingView from "./OnboardingView";
 import MasterAdmin from "./MasterAdmin";
+import InstallPrompt from "./InstallPrompt";
+import { PrivacyPolicy, TermsOfService } from "./LegalPages";
 
 // ============================================
 // URL PARSING
@@ -45,13 +49,17 @@ function getRouteFromUrl() {
   const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
   const parts = path.split("/");
   const slug = parts[0] || null;
+  const isManager = parts[1] === "manager";
   const isBartender = parts[1] === "bartender";
+  const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
   const isSignup = parts[0] === "admin" && parts[1] === "signup";
   const isMasterAdmin = parts[0] === "admin" && parts[1] === "master";
   const isOAuthComplete = parts[0] === "oauth-complete";
-  return { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete };
+  const isPrivacy = parts[0] === "privacy";
+  const isTerms = parts[0] === "terms";
+  return { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
 }
 
 // ============================================
@@ -215,7 +223,46 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
-  const { slug, isBartender, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete } = getRouteFromUrl();
+  const [demoView, setDemoView] = useState("patron");
+  const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
+  const { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+
+  // Set demo view based on URL on mount
+  useEffect(() => {
+    if (isManager) setDemoView("manager");
+    if (isBartender) setDemoView("bartender");
+    if (isKitchen) setDemoView("kitchen");
+  }, []);
+
+  // OAuth redirect handler
+  useEffect(() => {
+    if (!isOAuthComplete) return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const venueId = urlParams.get("venue_id");
+    const squareStatus = urlParams.get("square");
+    const oauthError = urlParams.get("error");
+
+    async function redirectToAdmin() {
+      if (venueId) {
+        const { data } = await supabase
+          .from("venues")
+          .select("slug")
+          .eq("id", venueId)
+          .single();
+        if (data?.slug) {
+          const params = squareStatus ? `?square=${squareStatus}` : oauthError ? `?error=${oauthError}` : "";
+          window.location.href = `/${data.slug}/admin${params}`;
+          return;
+        }
+      }
+      window.location.href = "/";
+    }
+    redirectToAdmin();
+  }, [isOAuthComplete]);
+
+  // Legal pages — no venue needed
+  if (isPrivacy) return <PrivacyPolicy />;
+  if (isTerms) return <TermsOfService />;
 
   // Signup page — no venue needed
   if (isSignup) {
@@ -227,33 +274,8 @@ export default function App() {
     return <MasterAdmin />;
   }
 
-  // OAuth complete — redirect to the venue's admin page with query params
+  // OAuth complete — show loading while redirect happens
   if (isOAuthComplete) {
-    const urlParams = new URLSearchParams(window.location.search);
-    const venueId = urlParams.get("venue_id");
-    const squareStatus = urlParams.get("square");
-    const oauthError = urlParams.get("error");
-
-    // Look up the venue slug from ID, then redirect
-    useEffect(() => {
-      async function redirectToAdmin() {
-        if (venueId) {
-          const { data } = await supabase
-            .from("venues")
-            .select("slug")
-            .eq("id", venueId)
-            .single();
-          if (data?.slug) {
-            const params = squareStatus ? `?square=${squareStatus}` : oauthError ? `?error=${oauthError}` : "";
-            window.location.href = `/${data.slug}/admin${params}`;
-            return;
-          }
-        }
-        window.location.href = "/";
-      }
-      redirectToAdmin();
-    }, []);
-
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", letterSpacing: 2 }}>CONNECTING SQUARE...</p>
@@ -301,7 +323,7 @@ export default function App() {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
         <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
-        <div style={{ width: 50, height: 50, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#e91e8c", animation: "spin 1s linear infinite" }} />
+        <div style={{ width: 50, height: 50, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite" }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", marginTop: 16, letterSpacing: 2 }}>LOADING VENUE...</p>
       </div>
@@ -312,18 +334,57 @@ export default function App() {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", padding: 24, textAlign: "center" }}>
         <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
-        <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, marginBottom: 16, background: "linear-gradient(135deg, #e91e8c, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>WAITLESS</h1>
+        <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, marginBottom: 16, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>WAITLESS</h1>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: "#888", maxWidth: 400 }}>{error}</p>
       </div>
     );
   }
 
   // Age verification gate (patron view only — not bartender, QR, or admin)
-  const needsAgeVerification = !isBartender && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
+  const needsAgeVerification = !isManager && !isBartender && !isKitchen && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
+
+  const isDemo = slug === "demo";
 
   return (
     <div style={{ minHeight: "100vh", background: BRAND.black, color: BRAND.white, fontFamily: "'Inter', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+      {/* Demo view switcher bar */}
+      {isDemo && !isAdmin && !isQR && (
+        <div style={{
+          position: "sticky", top: 0, zIndex: 200,
+          background: "#1E4D8C15", borderBottom: "1px solid #1E4D8C33",
+          padding: "8px 20px", display: "flex", justifyContent: "space-between", alignItems: "center",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#D4A843" }} />
+            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#D4A843", letterSpacing: 2 }}>WAITLESS DEMO</span>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {[
+              { key: "patron", label: "PATRON", color: "#D4A843" },
+              { key: "manager", label: "MANAGER", color: "#1E4D8C" },
+              { key: "bartender", label: "BAR", color: "#e91e8c" },
+              { key: "kitchen", label: "KITCHEN", color: "#2ecc71" },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setDemoView(tab.key)}
+                style={{
+                  padding: "5px 14px", borderRadius: 14, cursor: "pointer",
+                  fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+                  border: demoView === tab.key ? `1px solid ${tab.color}` : "1px solid #333",
+                  background: demoView === tab.key ? tab.color + "22" : "transparent",
+                  color: demoView === tab.key ? tab.color : "#666",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {needsAgeVerification && (
         <AgeVerification venue={venue} BRAND={BRAND} onVerified={() => setAgeVerifiedState(true)} />
       )}
@@ -331,10 +392,14 @@ export default function App() {
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
-      ) : isBartender ? (
+      ) : isKitchen || (isDemo && demoView === "kitchen") ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} stationFilter="kitchen" />
+      ) : isBartender || (isDemo && demoView === "bartender") ? (
+        <KitchenDisplay venue={venue} BRAND={BRAND} stationFilter="bar" />
+      ) : isManager || (isDemo && demoView === "manager") ? (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
-        <PatronView venue={venue} menu={menu} BRAND={BRAND} />
+        <PatronView venue={venue} menu={menu} BRAND={BRAND} demoOrders={isDemo ? demoOrders : null} setDemoOrders={isDemo ? setDemoOrders : null} />
       )}
     </div>
   );
@@ -344,17 +409,33 @@ export default function App() {
 // PATRON VIEW
 // ============================================
 
-function PatronView({ venue, menu, BRAND }) {
+function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const [cart, setCart] = useState([]);
-  const [view, setView] = useState("menu"); // menu | cart | payment | processing | confirmation
+  const [view, setView] = useState(() => {
+    // If returning to patron view with existing demo orders, show confirmation
+    if (demoOrders && demoOrders.length > 0) return "confirmation";
+    return "menu";
+  });
   const [processingStep, setProcessingStep] = useState("");
-  const [activeOrders, setActiveOrders] = useState([]); // All active orders for this patron
+  const [activeOrders, setActiveOrders] = useState(demoOrders || []); // Restore from demo state if available
   const [activeOrderIndex, setActiveOrderIndex] = useState(0); // Which badge is showing
   const [tipPercent, setTipPercent] = useState(0); // 0, 15, 18, 20, or custom
   const [customTip, setCustomTip] = useState("");
   const [showCustomTip, setShowCustomTip] = useState(false);
   const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
   const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
+  const [specialInstructions, setSpecialInstructions] = useState(""); // Order-level notes
+
+  // Sync active orders back to parent demo state when they change
+  useEffect(() => {
+    if (setDemoOrders && activeOrders.length > 0) {
+      setDemoOrders(activeOrders);
+    }
+  }, [activeOrders]);
+
+  // Modifier modal state
+  const [modifierModal, setModifierModal] = useState(null); // { item, modifiers, selectedMods, notes }
+  const [loadingModifiers, setLoadingModifiers] = useState(false);
 
   // Request push notification permission on mount
   useEffect(() => {
@@ -375,23 +456,82 @@ function PatronView({ venue, menu, BRAND }) {
   const currentOrder = activeOrders[activeOrderIndex];
   const anyReady = activeOrders.some((o) => o.status === "ready");
 
-  const addToCart = (item) => {
+  // Handle adding an item — check for modifiers first
+  const handleAddItem = async (item) => {
+    setLoadingModifiers(true);
+    try {
+      const modifiers = await getMenuItemModifiers(item.id);
+      if (modifiers && modifiers.length > 0) {
+        // Item has modifiers — show the modal
+        const selectedMods = {};
+        modifiers.forEach((group) => {
+          const defaultOpt = group.options.find((o) => o.is_default);
+          if (defaultOpt) {
+            selectedMods[group.id] = group.max_selections > 1 ? [defaultOpt.id] : defaultOpt.id;
+          } else {
+            selectedMods[group.id] = group.max_selections > 1 ? [] : null;
+          }
+        });
+        setModifierModal({ item, modifiers, selectedMods, notes: "" });
+      } else {
+        // No modifiers — add directly
+        addToCart(item, [], "");
+      }
+    } catch (err) {
+      // If modifier fetch fails, just add the item plain
+      addToCart(item, [], "");
+    } finally {
+      setLoadingModifiers(false);
+    }
+  };
+
+  // Confirm modifier selections and add to cart
+  const confirmModifierSelection = () => {
+    if (!modifierModal) return;
+    const { item, modifiers, selectedMods, notes } = modifierModal;
+
+    // Build selected modifier labels and extra cost
+    const selectedModifiers = [];
+    let extraCents = 0;
+
+    modifiers.forEach((group) => {
+      const sel = selectedMods[group.id];
+      if (!sel) return;
+      const ids = Array.isArray(sel) ? sel : [sel];
+      ids.forEach((optId) => {
+        const opt = group.options.find((o) => o.id === optId);
+        if (opt) {
+          selectedModifiers.push({ group: group.group_name, option: opt.option_name, priceCents: opt.price_cents });
+          extraCents += opt.price_cents || 0;
+        }
+      });
+    });
+
+    addToCart(item, selectedModifiers, notes, extraCents);
+    setModifierModal(null);
+  };
+
+  const addToCart = (item, modifiers = [], itemNotes = "", extraCents = 0) => {
+    // Create a unique key based on item + modifiers combo
+    const modKey = modifiers.map((m) => `${m.group}:${m.option}`).sort().join("|");
+    const cartKey = `${item.id}_${modKey}_${itemNotes}`;
+
     setCart((prev) => {
-      const ex = prev.find((c) => c.id === item.id);
-      if (ex) return prev.map((c) => (c.id === item.id ? { ...c, qty: c.qty + 1 } : c));
-      return [...prev, { ...item, qty: 1 }];
+      const ex = prev.find((c) => c.cartKey === cartKey);
+      if (ex) return prev.map((c) => (c.cartKey === cartKey ? { ...c, qty: c.qty + 1 } : c));
+      return [...prev, { ...item, qty: 1, cartKey, modifiers, itemNotes, extraCents }];
     });
   };
 
-  const removeFromCart = (id) => {
+  const removeFromCart = (cartKey) => {
     setCart((prev) => {
-      const ex = prev.find((c) => c.id === id);
-      if (ex && ex.qty > 1) return prev.map((c) => (c.id === id ? { ...c, qty: c.qty - 1 } : c));
-      return prev.filter((c) => c.id !== id);
+      const ex = prev.find((c) => c.cartKey === cartKey);
+      if (ex && ex.qty > 1) return prev.map((c) => (c.cartKey === cartKey ? { ...c, qty: c.qty - 1 } : c));
+      return prev.filter((c) => c.cartKey !== cartKey);
     });
   };
 
-  const subtotalCents = cart.reduce((s, i) => s + i.price_cents * i.qty, 0);
+  const subtotalCents = cart.reduce((s, i) => s + (i.price_cents + (i.extraCents || 0)) * i.qty, 0);
   const feeCents = Math.round(subtotalCents * (venue.service_fee_percent / 100));
   const tipCents = showCustomTip
     ? Math.round((parseFloat(customTip) || 0) * 100)
@@ -473,13 +613,22 @@ function PatronView({ venue, menu, BRAND }) {
         venueId: venue.id,
         letter,
         color,
-        items: cart.map((i) => ({ id: i.id, name: i.item_name, qty: i.qty, price: i.price_cents / 100 })),
+        items: cart.map((i) => ({
+          id: i.id,
+          name: i.item_name,
+          qty: i.qty,
+          price: (i.price_cents + (i.extraCents || 0)) / 100,
+          modifiers: i.modifiers || [],
+          notes: i.itemNotes || "",
+          station: i.station || "all",
+        })),
         subtotalCents,
         feeCents: feeCents + tipCents,
         totalCents,
         squarePaymentId: isDemoMode ? "DEMO" : data.paymentId,
         squareOrderId: isDemoMode ? "DEMO" : data.orderId,
         patronPhone: patronPhone || null,
+        specialInstructions: specialInstructions || null,
       });
 
       // Request push notification permission after first order
@@ -546,22 +695,20 @@ function PatronView({ venue, menu, BRAND }) {
               </h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {menuByCategory[catName].map((item) => {
-                  const inCart = cart.find((c) => c.id === item.id);
+                  const inCart = cart.filter((c) => c.id === item.id);
+                  const totalInCart = inCart.reduce((s, c) => s + c.qty, 0);
                   return (
-                    <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: inCart ? `1px solid ${BRAND.primary}44` : "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                    <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: totalInCart > 0 ? `1px solid ${BRAND.primary}44` : "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                       <div style={{ flex: 1 }}>
                         <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1, marginBottom: 3 }}>{item.item_name}</div>
                         {item.description && <div style={{ fontSize: 12, color: BRAND.gray, fontWeight: 300 }}>{item.description}</div>}
                         <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent, marginTop: 4 }}>${(item.price_cents / 100).toFixed(2)}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        {inCart && (
-                          <>
-                            <button onClick={() => removeFromCart(item.id)} style={{ width: 32, height: 32, borderRadius: "50%", border: `1px solid ${BRAND.dimText}`, background: "transparent", color: BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
-                            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{inCart.qty}</span>
-                          </>
+                        {totalInCart > 0 && (
+                          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{totalInCart}</span>
                         )}
-                        <button onClick={() => addToCart(item)} style={{ width: 32, height: 32, borderRadius: "50%", border: inCart ? `1px solid ${BRAND.primary}` : `1px solid ${BRAND.dimText}`, background: inCart ? BRAND.primary : "transparent", color: inCart ? BRAND.white : BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}>+</button>
+                        <button onClick={() => handleAddItem(item)} style={{ width: 32, height: 32, borderRadius: "50%", border: totalInCart > 0 ? `1px solid ${BRAND.primary}` : `1px solid ${BRAND.dimText}`, background: totalInCart > 0 ? BRAND.primary : "transparent", color: totalInCart > 0 ? BRAND.white : BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}>+</button>
                       </div>
                     </div>
                   );
@@ -569,6 +716,88 @@ function PatronView({ venue, menu, BRAND }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* MODIFIER MODAL */}
+      {modifierModal && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "flex-end", justifyContent: "center", padding: 0 }}>
+          <div style={{ background: BRAND.darkGray, borderRadius: "20px 20px 0 0", padding: "24px 20px 32px", maxWidth: 480, width: "100%", maxHeight: "80vh", overflow: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, letterSpacing: 1 }}>{modifierModal.item.item_name}</div>
+                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: BRAND.accent, marginTop: 2 }}>${(modifierModal.item.price_cents / 100).toFixed(2)}</div>
+              </div>
+              <button onClick={() => setModifierModal(null)} style={{ background: "transparent", border: "none", color: BRAND.gray, fontSize: 20, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {modifierModal.modifiers.map((group) => (
+              <div key={group.id} style={{ marginBottom: 16 }}>
+                <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, color: BRAND.accent, textTransform: "uppercase", marginBottom: 8 }}>
+                  {group.group_name}
+                  {group.required && <span style={{ color: BRAND.primary, marginLeft: 6, fontSize: 10 }}>REQUIRED</span>}
+                </div>
+                {group.options.map((opt) => {
+                  const sel = modifierModal.selectedMods[group.id];
+                  const isSelected = group.max_selections > 1
+                    ? (Array.isArray(sel) && sel.includes(opt.id))
+                    : sel === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        setModifierModal((prev) => {
+                          const newMods = { ...prev.selectedMods };
+                          if (group.max_selections > 1) {
+                            const arr = Array.isArray(newMods[group.id]) ? [...newMods[group.id]] : [];
+                            if (arr.includes(opt.id)) {
+                              newMods[group.id] = arr.filter((x) => x !== opt.id);
+                            } else if (arr.length < group.max_selections) {
+                              newMods[group.id] = [...arr, opt.id];
+                            }
+                          } else {
+                            newMods[group.id] = isSelected ? null : opt.id;
+                          }
+                          return { ...prev, selectedMods: newMods };
+                        });
+                      }}
+                      style={{
+                        width: "100%", padding: "12px 14px", marginBottom: 4, borderRadius: 10,
+                        border: isSelected ? `1.5px solid ${BRAND.primary}` : "1px solid #333",
+                        background: isSelected ? BRAND.primary + "15" : "transparent",
+                        display: "flex", justifyContent: "space-between", alignItems: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <span style={{ fontFamily: "'Inter', sans-serif", fontSize: 14, color: isSelected ? BRAND.white : BRAND.gray }}>{opt.option_name}</span>
+                      {opt.price_cents > 0 && (
+                        <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: BRAND.accent }}>+${(opt.price_cents / 100).toFixed(2)}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+
+            {/* Item-level notes */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, color: BRAND.accent, textTransform: "uppercase", marginBottom: 8 }}>Special Instructions</div>
+              <input
+                type="text"
+                placeholder="e.g., extra ice, no garnish..."
+                value={modifierModal.notes}
+                onChange={(e) => setModifierModal((prev) => ({ ...prev, notes: e.target.value }))}
+                style={{ width: "100%", padding: "12px", background: "#0a0a0a", border: "1px solid #333", borderRadius: 8, color: BRAND.white, fontFamily: "'Inter', sans-serif", fontSize: 14, outline: "none" }}
+              />
+            </div>
+
+            <button
+              onClick={confirmModifierSelection}
+              style={{ width: "100%", padding: "16px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 12, color: BRAND.white, fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}
+            >
+              ADD TO ORDER
+            </button>
+          </div>
         </div>
       )}
 
@@ -581,14 +810,43 @@ function PatronView({ venue, menu, BRAND }) {
           ) : (
             <>
               {cart.map((item) => (
-                <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1 }}>{item.item_name} × {item.qty}</span>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent }}>${((item.price_cents * item.qty) / 100).toFixed(2)}</span>
-                    <button onClick={() => removeFromCart(item.id)} style={{ background: "transparent", border: "1px solid #333", borderRadius: "50%", width: 28, height: 28, color: BRAND.gray, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                <div key={item.cartKey} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: "1px solid #222", marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1 }}>{item.item_name} × {item.qty}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent }}>${(((item.price_cents + (item.extraCents || 0)) * item.qty) / 100).toFixed(2)}</span>
+                      <button onClick={() => removeFromCart(item.cartKey)} style={{ background: "transparent", border: "1px solid #333", borderRadius: "50%", width: 28, height: 28, color: BRAND.gray, fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>−</button>
+                    </div>
                   </div>
+                  {item.modifiers && item.modifiers.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      {item.modifiers.map((m, idx) => (
+                        <span key={idx} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, marginRight: 8 }}>
+                          {m.option}{m.priceCents > 0 ? ` +$${(m.priceCents / 100).toFixed(2)}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {item.itemNotes && (
+                    <div style={{ marginTop: 4, fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.dimText, fontStyle: "italic" }}>
+                      "{item.itemNotes}"
+                    </div>
+                  )}
                 </div>
               ))}
+
+              {/* Order-level special instructions */}
+              <div style={{ marginTop: 12, marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 6 }}>Order notes (optional)</div>
+                <input
+                  type="text"
+                  placeholder="e.g., allergies, group order, table number..."
+                  value={specialInstructions}
+                  onChange={(e) => setSpecialInstructions(e.target.value)}
+                  style={{ width: "100%", padding: "12px", background: "#0a0a0a", border: "1px solid #333", borderRadius: 10, color: BRAND.white, fontFamily: "'Inter', sans-serif", fontSize: 14, outline: "none" }}
+                />
+              </div>
+
               <div style={{ marginTop: 20, padding: "16px 0", borderTop: "1px solid #222" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 13, color: BRAND.gray }}>
                   <span>Subtotal</span><span style={{ fontFamily: "'Space Mono', monospace" }}>${(subtotalCents / 100).toFixed(2)}</span>
@@ -813,6 +1071,9 @@ function PatronView({ venue, menu, BRAND }) {
           </button>
         </div>
       )}
+
+      {/* PWA Install Prompt */}
+      <InstallPrompt BRAND={BRAND} />
     </div>
   );
 }
@@ -1040,13 +1301,48 @@ function BartenderView({ venue, BRAND }) {
                 <div style={{ padding: "5px 12px", borderRadius: 20, background: config.accent + "22", border: `1px solid ${config.accent}44`, fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: config.accent, letterSpacing: 2 }}>{config.label}</div>
               </div>
 
-              {/* Drinks */}
-              {(order.items || []).map((item, idx) => (
-                <div key={idx} style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: BRAND.white, letterSpacing: 0.5 }}>{item.name}</span>
-                  <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+              {/* Items with modifiers and station status */}
+              {(order.items || []).map((item, idx) => {
+                const itemStatus = order.item_statuses?.[idx] || (order.status === "pending" ? "pending" : "pending");
+                const isItemReady = itemStatus === "ready";
+                return (
+                  <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {/* Item ready indicator */}
+                    {order.status === "in_progress" && (
+                      <span style={{ fontSize: 10, color: isItemReady ? BRAND.success : "#444" }}>{isItemReady ? "✓" : "○"}</span>
+                    )}
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: isItemReady ? BRAND.success : BRAND.white, letterSpacing: 0.5, textDecoration: isItemReady ? "line-through" : "none" }}>{item.name}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          {item.station && item.station !== "all" && (
+                            <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "1px 5px", borderRadius: 3, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115" }}>{item.station === "bar" ? "BAR" : "KIT"}</span>
+                          )}
+                          <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
+                        </div>
+                      </div>
+                      {item.modifiers && item.modifiers.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3, marginLeft: 8 }}>
+                          {item.modifiers.map((m, mi) => (
+                            <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.primary, padding: "2px 6px", background: BRAND.primary + "15", borderRadius: 4 }}>{m.option}</span>
+                          ))}
+                        </div>
+                      )}
+                      {item.notes && (
+                        <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: BRAND.accent, marginTop: 3, marginLeft: 8, fontStyle: "italic" }}>"{item.notes}"</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Order-level special instructions */}
+              {order.special_instructions && (
+                <div style={{ padding: "8px 10px", background: BRAND.accent + "11", borderRadius: 6, border: `1px solid ${BRAND.accent}22` }}>
+                  <span style={{ fontSize: 10, fontFamily: "'Space Mono', monospace", color: BRAND.accent, letterSpacing: 1 }}>NOTE: </span>
+                  <span style={{ fontSize: 11, fontFamily: "'Space Mono', monospace", color: BRAND.white }}>{order.special_instructions}</span>
                 </div>
-              ))}
+              )}
 
               {/* Ready timestamp */}
               {order.status === "ready" && order.ready_at && (
@@ -1114,13 +1410,174 @@ function BartenderView({ venue, BRAND }) {
 
             <p style={{ fontSize: 13, color: BRAND.gray, textAlign: "center", lineHeight: 1.5, margin: 0 }}>Match this to the patron's phone before handing off.</p>
 
-            <div style={{ display: "flex", gap: 10, width: "100%" }}>
-              <button onClick={() => setVerifyOrder(null)} style={{ flex: 1, padding: "13px", background: "transparent", border: "1px solid #444", borderRadius: 10, color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>CANCEL</button>
-              <button onClick={() => { markOrderPickedUp(verifyOrder.id); setVerifyOrder(null); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>CONFIRM</button>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setVerifyOrder(null)} style={{ flex: 1, padding: "13px", background: "transparent", border: "1px solid #444", borderRadius: 10, color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>CANCEL</button>
+                <button onClick={() => { markOrderPickedUp(verifyOrder.id); setVerifyOrder(null); }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>CONFIRM</button>
+              </div>
+              <button onClick={async () => { await supabase.from("bar_orders").update({ status: "in_progress", ready_at: null }).eq("id", verifyOrder.id); setVerifyOrder(null); }} style={{ width: "100%", padding: "11px", background: "#e74c3c22", border: "1px solid #e74c3c44", borderRadius: 10, color: "#e74c3c", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer" }}>SEND BACK — REMAKE</button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================
+// KITCHEN DISPLAY (read-only, large text)
+// ============================================
+function KitchenDisplay({ venue, BRAND, stationFilter }) {
+  const [orders, setOrders] = useState([]);
+  const isBar = stationFilter === "bar";
+  const displayLabel = isBar ? "BAR DISPLAY" : "KITCHEN DISPLAY";
+  const accentColor = isBar ? "#e91e8c" : "#2ecc71";
+
+  useEffect(() => {
+    const unsub = subscribeToBartenderQueue(venue.id, setOrders);
+    return () => unsub();
+  }, [venue.id]);
+
+  // Filter orders to only those that have items for this station
+  const filteredOrders = orders
+    .filter((o) => o.status === "in_progress")
+    .map((order) => {
+      // Find which items belong to this station
+      const stationItems = (order.items || []).map((item, idx) => ({ ...item, _idx: idx }))
+        .filter((item) => {
+          if (!stationFilter || stationFilter === "all") return true;
+          const itemStation = item.station || "all";
+          return itemStation === stationFilter || itemStation === "all";
+        });
+      if (stationItems.length === 0) return null;
+      return { ...order, stationItems };
+    })
+    .filter(Boolean)
+    .sort((a, b) => new Date(a.ordered_at) - new Date(b.ordered_at));
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#000", padding: 16 }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "10px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>
+        <div>
+          <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 3, color: "#f5f5f5" }}>{venue.name?.toUpperCase()}</span>
+          <span style={{ display: "block", fontFamily: "'Space Mono', monospace", fontSize: 10, color: accentColor, letterSpacing: 2 }}>{displayLabel}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 28, fontWeight: 700, color: "#d4a843" }}>{filteredOrders.length}</span>
+          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#888", letterSpacing: 1 }}>ORDERS<br/>IN QUEUE</span>
+        </div>
+      </div>
+
+      {/* Orders grid */}
+      {filteredOrders.length === 0 ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
+          <div style={{ textAlign: "center" }}>
+            <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700, color: "#333", letterSpacing: 4 }}>ALL CLEAR</span>
+            <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#444", marginTop: 8, letterSpacing: 2 }}>NO ORDERS IN QUEUE</p>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
+          {filteredOrders.map((order) => (
+            <div key={order.id} style={{
+              background: "#0a0a0a", borderRadius: 14, border: `2px solid ${accentColor}44`,
+              padding: 16, display: "flex", flexDirection: "column", gap: 10,
+            }}>
+              {/* Order header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 10,
+                    backgroundColor: order.confirm_hex, display: "flex",
+                    alignItems: "center", justifyContent: "center",
+                  }}>
+                    <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, color: "#fff" }}>{order.confirm_letter}</span>
+                  </div>
+                  <div>
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+                      {order.confirm_color} {order.confirm_letter}
+                    </span>
+                  </div>
+                </div>
+                <WaitTimer since={order.ordered_at} />
+              </div>
+
+              {/* Station items — BIG TEXT with per-item READY */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {order.stationItems.map((item) => {
+                  const itemStatus = order.item_statuses?.[item._idx] || "pending";
+                  const isItemReady = itemStatus === "ready";
+
+                  return (
+                    <div key={item._idx} style={{
+                      padding: "10px 12px", borderRadius: 8,
+                      background: isItemReady ? "#2ecc7115" : "#141414",
+                      border: isItemReady ? "1px solid #2ecc7133" : "1px solid #1a1a1a",
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                            <span style={{
+                              fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 600,
+                              color: isItemReady ? "#2ecc71" : "#f5f5f5", letterSpacing: 1,
+                              textDecoration: isItemReady ? "line-through" : "none",
+                            }}>{item.name}</span>
+                            <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, color: "#d4a843" }}>x{item.qty}</span>
+                          </div>
+                          {item.modifiers && item.modifiers.length > 0 && (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 4 }}>
+                              {item.modifiers.map((m, mi) => (
+                                <span key={mi} style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#000", padding: "3px 10px", background: "#d4a843", borderRadius: 6 }}>{m.option}</span>
+                              ))}
+                            </div>
+                          )}
+                          {item.notes && (
+                            <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, fontWeight: 700, color: "#e74c3c", marginTop: 4 }}>{item.notes}</div>
+                          )}
+                        </div>
+
+                        {/* Per-item READY button */}
+                        {!isItemReady && (
+                          <button
+                            onClick={async () => {
+                              const allDone = await markItemReady(order.id, item._idx);
+                              if (allDone) {
+                                fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {});
+                              }
+                            }}
+                            style={{
+                              marginLeft: 10, padding: "10px 20px", borderRadius: 8, border: "none",
+                              background: "#2ecc71", color: "#000",
+                              fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700,
+                              letterSpacing: 2, cursor: "pointer", whiteSpace: "nowrap",
+                            }}
+                          >
+                            READY
+                          </button>
+                        )}
+                        {isItemReady && (
+                          <span style={{ marginLeft: 10, fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#2ecc71", letterSpacing: 2 }}>DONE</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Order-level special instructions */}
+              {order.special_instructions && (
+                <div style={{ padding: "10px 12px", background: "#e74c3c22", borderRadius: 8, border: "2px solid #e74c3c66" }}>
+                  <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e74c3c", letterSpacing: 2 }}>NOTE: </span>
+                  <span style={{ display: "block", fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, color: "#f5f5f5", marginTop: 2 }}>{order.special_instructions}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.85; } }`}</style>
     </div>
   );
 }

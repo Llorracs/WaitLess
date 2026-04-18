@@ -1357,15 +1357,20 @@ function BartenderView({ venue, BRAND }) {
                 {order.status === "pending" && (
                   <button onClick={() => startMakingOrder(order.id)} style={{ flex: 1, padding: "13px", background: BRAND.accent, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>START MAKING</button>
                 )}
-                {order.status === "in_progress" && (
-                  <button onClick={async () => {
-                    // Mark all items as ready
-                    const allStatuses = {};
-                    (order.items || []).forEach((_, idx) => { allStatuses[idx] = "ready"; });
-                    await supabase.from("bar_orders").update({ item_statuses: allStatuses, status: "ready", ready_at: new Date().toISOString() }).eq("id", order.id);
-                    fetch("/.netlify/functions/send-notification", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ orderId: order.id, venueId: venue.id }) }).catch(() => {});
-                  }} style={{ flex: 1, padding: "13px", background: BRAND.success, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>ORDER READY</button>
-                )}
+                {order.status === "in_progress" && (() => {
+                  const totalItems = (order.items || []).length;
+                  const readyItems = Object.values(order.item_statuses || {}).filter((s) => s === "ready").length;
+                  return (
+                    <div style={{ flex: 1, padding: "13px", background: "#141414", borderRadius: 10, border: "1px solid #333", textAlign: "center" }}>
+                      <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 2, color: readyItems > 0 ? BRAND.accent : BRAND.gray }}>
+                        {readyItems} OF {totalItems} ITEMS READY
+                      </div>
+                      <div style={{ width: "100%", height: 4, background: "#222", borderRadius: 2, marginTop: 6, overflow: "hidden" }}>
+                        <div style={{ width: `${totalItems > 0 ? (readyItems / totalItems) * 100 : 0}%`, height: "100%", background: `linear-gradient(90deg, ${BRAND.accent}, ${BRAND.success})`, borderRadius: 2, transition: "width 0.3s ease" }} />
+                      </div>
+                    </div>
+                  );
+                })()}
                 {order.status === "ready" && (
                   <button onClick={() => setVerifyOrder(order)} style={{ flex: 1, padding: "13px", background: "transparent", border: `1.5px solid ${BRAND.success}`, borderRadius: 10, color: BRAND.success, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>VERIFY & HAND OFF</button>
                 )}

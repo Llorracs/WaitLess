@@ -219,9 +219,9 @@ function MasterMenuBuilder({ venue, onBack }) {
                 </div>
                 <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                   <label style={{ fontSize: 9, color: "#888", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>STATION:</label>
-                  <select value={editingItem.station || "all"} onChange={(e) => setEditingItem({ ...editingItem, station: e.target.value })} style={{ ...MS.input, width: 100, padding: "6px 8px", fontSize: 12 }}>
-                    <option value="all">All</option>
-                    <option value="bar">Bar</option>
+                  <select value={editingItem.station || "non-alc"} onChange={(e) => setEditingItem({ ...editingItem, station: e.target.value })} style={{ ...MS.input, width: 110, padding: "6px 8px", fontSize: 12 }}>
+                    <option value="bar">Bar (21+)</option>
+                    <option value="non-alc">Non-Alcoholic</option>
                     <option value="kitchen">Kitchen</option>
                   </select>
                 </div>
@@ -236,8 +236,8 @@ function MasterMenuBuilder({ venue, onBack }) {
                   <span style={MS.itemName}>{item.item_name}</span>
                   {item.description && <span style={MS.itemDesc}>{item.description}</span>}
                 </div>
-                {item.station && item.station !== "all" && (
-                  <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "2px 6px", borderRadius: 4, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115", border: `1px solid ${item.station === "bar" ? "#e91e8c33" : "#2ecc7133"}` }}>{item.station === "bar" ? "BAR" : "KITCHEN"}</span>
+                {item.station && item.station !== "non-alc" && (
+                  <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "2px 6px", borderRadius: 4, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115", border: `1px solid ${item.station === "bar" ? "#e91e8c33" : "#2ecc7133"}` }}>{item.station === "bar" ? "BAR 21+" : "KITCHEN"}</span>
                 )}
                 <span style={MS.itemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
                 <button onClick={() => { setModifierItemId(item.id); loadModifiers(item.id); }} style={{ ...MS.iconBtn, fontSize: 9, fontFamily: "'Space Mono', monospace", color: "#d4a843", border: "1px solid #d4a84333", borderRadius: 4, padding: "2px 6px" }}>MODS</button>

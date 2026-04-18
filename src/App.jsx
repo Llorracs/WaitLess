@@ -340,8 +340,8 @@ export default function App() {
     );
   }
 
-  // Age verification gate (patron view only — not bartender, QR, or admin)
-  const needsAgeVerification = !isManager && !isBartender && !isKitchen && !isQR && !isAdmin && venue?.require_age_verification && !ageVerified;
+  // Age verification — no longer gates the venue, checked at checkout based on cart contents
+  const needsAgeVerification = false; // Moved to checkout flow in PatronView
 
   const isDemo = slug === "demo";
 
@@ -425,6 +425,12 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
   const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
   const [specialInstructions, setSpecialInstructions] = useState(""); // Order-level notes
+  const [showAgeVerification, setShowAgeVerification] = useState(false); // Cart-based age check
+  const [ageVerified, setAgeVerified] = useState(() => isAgeVerified(venue.id));
+
+  // Check if cart has alcoholic items
+  const cartHasAlcohol = cart.some((item) => item.station === "bar");
+  const needsAgeCheck = venue?.require_age_verification && cartHasAlcohol && !ageVerified;
 
   // Sync active orders back to parent demo state when they change
   useEffect(() => {
@@ -569,6 +575,12 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const isDemoMode = !venue.square_app_id || !venue.square_location_id;
 
   const handleCheckout = async () => {
+    // Check if age verification is needed before proceeding
+    if (needsAgeCheck) {
+      setShowAgeVerification(true);
+      return;
+    }
+
     setView("processing");
 
     try {
@@ -716,6 +728,50 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* AGE VERIFICATION MODAL */}
+      {showAgeVerification && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 1100, background: "rgba(0,0,0,0.92)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#141414", borderRadius: 20, padding: "32px 24px", maxWidth: 400, width: "100%", textAlign: "center" }}>
+            <span style={{ fontSize: 40 }}>🍺</span>
+            <h3 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 2, margin: "16px 0 8px" }}>Age Verification Required</h3>
+            <p style={{ fontSize: 13, color: "#888", lineHeight: 1.6, marginBottom: 20 }}>Your order contains alcoholic beverages. Please verify you are {venue.minimum_age || 21}+ to continue.</p>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button
+                onClick={() => {
+                  setShowAgeVerification(false);
+                  setAgeVerified(true);
+                  // Store verification in session
+                  sessionStorage.setItem(`age_verified_${venue.id}`, "true");
+                  // Proceed to checkout
+                  setTimeout(() => handleCheckout(), 100);
+                }}
+                style={{ padding: "16px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 12, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}
+              >
+                I AM {venue.minimum_age || 21} OR OLDER
+              </button>
+              <button
+                onClick={() => {
+                  setShowAgeVerification(false);
+                  // Remove alcoholic items from cart
+                  setCart((prev) => prev.filter((item) => item.station !== "bar"));
+                  alert("Alcoholic items have been removed from your cart.");
+                }}
+                style={{ padding: "12px", background: "transparent", border: "1px solid #333", borderRadius: 12, color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 500, letterSpacing: 2, cursor: "pointer" }}
+              >
+                REMOVE ALCOHOL FROM ORDER
+              </button>
+              <button
+                onClick={() => setShowAgeVerification(false)}
+                style={{ padding: "8px", background: "transparent", border: "none", color: "#555", fontSize: 12, cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1316,7 +1372,7 @@ function BartenderView({ venue, BRAND }) {
                         <span style={{ fontSize: 15, fontFamily: "'Oswald', sans-serif", fontWeight: 500, color: isItemReady ? BRAND.success : BRAND.white, letterSpacing: 0.5, textDecoration: isItemReady ? "line-through" : "none" }}>{item.name}</span>
                         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                           {item.station && item.station !== "all" && (
-                            <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "1px 5px", borderRadius: 3, color: item.station === "bar" ? "#e91e8c" : "#2ecc71", background: item.station === "bar" ? "#e91e8c15" : "#2ecc7115" }}>{item.station === "bar" ? "BAR" : "KIT"}</span>
+                            <span style={{ fontSize: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1, padding: "1px 5px", borderRadius: 3, color: item.station === "bar" ? "#e91e8c" : item.station === "kitchen" ? "#2ecc71" : "#d4a843", background: item.station === "bar" ? "#e91e8c15" : item.station === "kitchen" ? "#2ecc7115" : "#d4a84315" }}>{item.station === "bar" ? "BAR" : item.station === "kitchen" ? "KIT" : "N/A"}</span>
                           )}
                           <span style={{ fontSize: 13, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>×{item.qty}</span>
                         </div>
@@ -1456,9 +1512,11 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
       // Find which items belong to this station
       const stationItems = (order.items || []).map((item, idx) => ({ ...item, _idx: idx }))
         .filter((item) => {
-          if (!stationFilter || stationFilter === "all") return true;
-          const itemStation = item.station || "all";
-          return itemStation === stationFilter || itemStation === "all";
+          if (!stationFilter) return true;
+          const itemStation = item.station || "non-alc";
+          if (stationFilter === "bar") return itemStation === "bar" || itemStation === "non-alc";
+          if (stationFilter === "kitchen") return itemStation === "kitchen";
+          return true;
         });
       if (stationItems.length === 0) return null;
       return { ...order, stationItems };

@@ -94,30 +94,74 @@ function getBrand(venue) {
 // SHARED COMPONENTS
 // ============================================
 
-function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 }) {
-  const [pulse, setPulse] = useState(true);
+function ConfirmationBadge({ letter, color, timestamp, status = "pending", size = 180 }) {
+  // Derive animation behavior from status — one source of truth.
+  // - pending/in_progress: slow pulse (waiting)
+  // - ready: fast pulse (attention — pick me up!)
+  // - picked_up / expired: no pulse, static
+  const isReady = status === "ready";
+  const isPickedUp = status === "picked_up";
+  const isTerminal = isPickedUp || status === "expired";
+  const shouldPulse = !isTerminal;
+
+  const [pulse, setPulse] = useState(false);
   const PICKUP_WINDOW = 600;
   const [remaining, setRemaining] = useState(PICKUP_WINDOW);
 
+  // Pulse animation — stops entirely on terminal states
   useEffect(() => {
-    const speed = drinkReady ? 600 : 1200;
+    if (!shouldPulse) {
+      setPulse(false); // Reset to static
+      return; // No interval scheduled
+    }
+    const speed = isReady ? 600 : 1200;
     const i = setInterval(() => setPulse((p) => !p), speed);
     return () => clearInterval(i);
-  }, [drinkReady]);
+  }, [shouldPulse, isReady]);
 
+  // Countdown timer — stops once the drink is ready (countdown only matters pre-ready)
   useEffect(() => {
-    if (drinkReady) return;
-    const i = setInterval(() => {
+    if (isReady || isTerminal) return;
+    const tick = () => {
       const elapsed = Math.floor((Date.now() - timestamp) / 1000);
       setRemaining(Math.max(0, PICKUP_WINDOW - elapsed));
-    }, 1000);
+    };
+    tick();
+    const i = setInterval(tick, 1000);
     return () => clearInterval(i);
-  }, [timestamp, drinkReady]);
+  }, [timestamp, isReady, isTerminal]);
 
   const mins = Math.floor(remaining / 60);
   const secs = remaining % 60;
   const isUrgent = remaining <= 120;
   const isExpired = remaining === 0;
+
+  // Static shadow for terminal states, pulsing otherwise
+  const boxShadow = !shouldPulse
+    ? `0 0 15px ${color.hex}33, inset 0 0 10px ${color.hex}11`
+    : pulse
+      ? `0 0 40px ${color.hex}88, 0 0 80px ${color.hex}44, inset 0 0 30px ${color.hex}22`
+      : `0 0 15px ${color.hex}44, inset 0 0 10px ${color.hex}11`;
+
+  const innerOpacity = !shouldPulse ? 0.3 : pulse ? 0.6 : 0.15;
+
+  const statusLabel = isPickedUp
+    ? "PICKED UP"
+    : isReady
+      ? "READY TO PICKUP"
+      : isExpired
+        ? "PICKUP WINDOW EXPIRED"
+        : `PICKUP IN ${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+
+  const statusColor = isPickedUp
+    ? "#888"
+    : isReady
+      ? "#2ecc71"
+      : isExpired
+        ? "#e74c3c"
+        : isUrgent
+          ? "#d4a843"
+          : "#666";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -128,15 +172,14 @@ function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 })
           borderRadius: size * 0.13,
           background: `radial-gradient(circle, ${color.hex}22, #141414)`,
           border: `3px solid ${color.hex}`,
-          boxShadow: pulse
-            ? `0 0 40px ${color.hex}88, 0 0 80px ${color.hex}44, inset 0 0 30px ${color.hex}22`
-            : `0 0 15px ${color.hex}44, inset 0 0 10px ${color.hex}11`,
+          boxShadow,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
           transition: "box-shadow 0.6s ease",
           position: "relative",
           overflow: "hidden",
+          opacity: isPickedUp ? 0.7 : 1,
         }}
       >
         <div
@@ -145,7 +188,7 @@ function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 })
             inset: 6,
             borderRadius: size * 0.1,
             border: `1px solid ${color.hex}`,
-            opacity: pulse ? 0.6 : 0.15,
+            opacity: innerOpacity,
             transition: "opacity 0.6s ease",
           }}
         />
@@ -155,7 +198,7 @@ function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 })
             fontFamily: "'Oswald', sans-serif",
             fontWeight: 700,
             color: color.hex,
-            textShadow: `0 0 20px ${color.hex}88`,
+            textShadow: isPickedUp ? "none" : `0 0 20px ${color.hex}88`,
             lineHeight: 1,
           }}
         >
@@ -169,6 +212,7 @@ function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 })
           color: color.hex,
           textTransform: "uppercase",
           letterSpacing: 3,
+          opacity: isPickedUp ? 0.6 : 1,
         }}
       >
         {color.name}
@@ -177,15 +221,11 @@ function ConfirmationBadge({ letter, color, timestamp, drinkReady, size = 180 })
         style={{
           fontSize: 11,
           fontFamily: "'Space Mono', monospace",
-          color: drinkReady ? "#2ecc71" : isExpired ? "#e74c3c" : isUrgent ? "#d4a843" : "#666",
+          color: statusColor,
           letterSpacing: 1,
         }}
       >
-        {drinkReady
-          ? "READY TO PICKUP"
-          : isExpired
-            ? "PICKUP WINDOW EXPIRED"
-            : `PICKUP IN ${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`}
+        {statusLabel}
       </div>
     </div>
   );
@@ -504,9 +544,15 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const [showAgeVerification, setShowAgeVerification] = useState(false); // Cart-based age check
   const [ageVerified, setAgeVerified] = useState(() => isAgeVerified(venue.id));
 
-  // Check if cart has alcoholic items
+  // Cart-based age verification
+  // Default: ANY item with station "bar" in the cart triggers age verification.
+  // Venues can explicitly opt out by setting require_age_verification === false.
+  // Previous bug: the check silently no-op'd when require_age_verification was
+  // null/undefined, so bar items sailed through with no gate. This treats the
+  // flag as default-on unless explicitly disabled.
   const cartHasAlcohol = cart.some((item) => item.station === "bar");
-  const needsAgeCheck = venue?.require_age_verification && cartHasAlcohol && !ageVerified;
+  const ageRequiredByVenue = venue?.require_age_verification !== false;
+  const needsAgeCheck = ageRequiredByVenue && cartHasAlcohol && !ageVerified;
 
   // Sync active orders back to parent demo state when they change
   useEffect(() => {
@@ -637,31 +683,66 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const totalCents = subtotalCents + feeCents + tipCents;
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
-  // Subscribe to all active orders
-  useEffect(() => {
-    if (activeOrders.length === 0) return;
+  // Subscribe to each active order individually via a ref-keyed map.
+  // Previous bug: re-running the effect on array length change tore down ALL
+  // subscriptions and rebuilt them — creating a reconnect gap where "ready"
+  // updates could be dropped. This version adds a subscription per new order id
+  // and only tears down the subscription for an order that's actually gone.
+  const subscriptionsRef = useRef(new Map()); // orderId -> unsubscribe fn
 
-    const unsubscribers = activeOrders.map((ord) =>
-      subscribeToOrder(ord.id, (newStatus, updatedOrder) => {
+  useEffect(() => {
+    const current = subscriptionsRef.current;
+    const activeIds = new Set(activeOrders.map((o) => o.id));
+
+    // Add subscriptions for any new orders
+    activeOrders.forEach((ord) => {
+      if (current.has(ord.id)) return; // Already subscribed
+
+      const unsub = subscribeToOrder(ord.id, (newStatus, updatedOrder) => {
+        // Always update from the payload — single source of truth
         setActiveOrders((prev) =>
-          prev.map((o) => (o.id === ord.id ? { ...o, status: newStatus } : o))
+          prev.map((o) =>
+            o.id === ord.id
+              ? { ...o, ...(updatedOrder || {}), status: newStatus }
+              : o
+          )
         );
 
-        // Fire push notification when order is ready
-        if (newStatus === "ready") {
-          if ("Notification" in window && Notification.permission === "granted") {
+        // Fire push notification when this specific order flips to ready
+        if (newStatus === "ready" && "Notification" in window && Notification.permission === "granted") {
+          try {
             new Notification(`${venue.name} — Your order is ready!`, {
               body: `Show your ${ord.confirm_color} ${ord.confirm_letter} badge at the pickup area.`,
               icon: venue.logo_url || undefined,
               tag: `order-${ord.id}`,
             });
+          } catch (_err) {
+            // Notification failures are non-fatal
           }
         }
-      })
-    );
+      });
 
-    return () => unsubscribers.forEach((unsub) => unsub());
-  }, [activeOrders.length]);
+      current.set(ord.id, unsub);
+    });
+
+    // Remove subscriptions for orders that are no longer active
+    for (const [id, unsub] of current.entries()) {
+      if (!activeIds.has(id)) {
+        try { unsub(); } catch (_err) { /* ignore */ }
+        current.delete(id);
+      }
+    }
+  }, [activeOrders, venue.name, venue.logo_url]);
+
+  // Clean up all subscriptions when PatronView unmounts
+  useEffect(() => {
+    return () => {
+      for (const unsub of subscriptionsRef.current.values()) {
+        try { unsub(); } catch (_err) { /* ignore */ }
+      }
+      subscriptionsRef.current.clear();
+    };
+  }, []);
 
   // Demo mode: no Square credentials → skip payment entirely
   const isDemoMode = !venue.square_app_id || !venue.square_location_id;
@@ -1166,7 +1247,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             letter={currentOrder.confirm_letter}
             color={{ hex: currentOrder.confirm_hex, name: currentOrder.confirm_color }}
             timestamp={new Date(currentOrder.ordered_at).getTime()}
-            drinkReady={currentOrder.status === "ready" || currentOrder.status === "picked_up"}
+            status={currentOrder.status}
           />
 
           {/* Queue estimate — only show when order is not ready */}
@@ -1562,7 +1643,7 @@ function BartenderView({ venue, BRAND }) {
               letter={verifyOrder.confirm_letter}
               color={{ hex: verifyOrder.confirm_hex, name: verifyOrder.confirm_color }}
               timestamp={new Date(verifyOrder.ordered_at).getTime()}
-              drinkReady={true}
+              status="ready"
               size={140}
             />
 

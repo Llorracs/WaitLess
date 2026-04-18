@@ -515,6 +515,22 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
     }
   }, [activeOrders]);
 
+  // Re-fetch order statuses when remounting with demo orders (they may be stale)
+  useEffect(() => {
+    if (!demoOrders || demoOrders.length === 0) return;
+    async function refreshStatuses() {
+      const ids = demoOrders.map((o) => o.id);
+      const { data } = await supabase
+        .from("bar_orders")
+        .select("*")
+        .in("id", ids);
+      if (data && data.length > 0) {
+        setActiveOrders(data);
+      }
+    }
+    refreshStatuses();
+  }, []);
+
   // Modifier modal state
   const [modifierModal, setModifierModal] = useState(null); // { item, modifiers, selectedMods, notes }
   const [loadingModifiers, setLoadingModifiers] = useState(false);
@@ -631,11 +647,11 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
           prev.map((o) => (o.id === ord.id ? { ...o, status: newStatus } : o))
         );
 
-        // Fire push notification when drink is ready
+        // Fire push notification when order is ready
         if (newStatus === "ready") {
           if ("Notification" in window && Notification.permission === "granted") {
-            new Notification(`${venue.name} — Your drink is ready!`, {
-              body: `Show your ${ord.confirm_color} ${ord.confirm_letter} badge at the bar.`,
+            new Notification(`${venue.name} — Your order is ready!`, {
+              body: `Show your ${ord.confirm_color} ${ord.confirm_letter} badge at the pickup area.`,
               icon: venue.logo_url || undefined,
               tag: `order-${ord.id}`,
             });
@@ -821,7 +837,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                   setShowAgeVerification(false);
                   setAgeVerified(true);
                   // Store verification in session
-                  sessionStorage.setItem(`age_verified_${venue.id}`, "true");
+                  sessionStorage.setItem(`waitless_age_verified_${venue.id}`, "true");
                   // Proceed to checkout — skip age check since we just verified
                   setTimeout(() => handleCheckout(true), 100);
                 }}
@@ -1150,7 +1166,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             letter={currentOrder.confirm_letter}
             color={{ hex: currentOrder.confirm_hex, name: currentOrder.confirm_color }}
             timestamp={new Date(currentOrder.ordered_at).getTime()}
-            drinkReady={currentOrder.status === "ready"}
+            drinkReady={currentOrder.status === "ready" || currentOrder.status === "picked_up"}
           />
 
           {/* Queue estimate — only show when order is not ready */}

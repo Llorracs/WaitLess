@@ -57,11 +57,15 @@ export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
  */
 export async function getVenueBySlug(slug) {
   const { data, error } = await supabase
-    .rpc('get_venue_by_slug', { venue_slug: slug });
+    .from('venues')
+    .select('*')
+    .eq('slug', slug)
+    .eq('is_active', true)
+    .single();
 
   if (error) throw error;
-  if (!data || data.length === 0) throw new Error(`Venue "${slug}" not found`);
-  return data[0];
+  if (!data) throw new Error(`Venue "${slug}" not found`);
+  return data;
 }
 
 /**

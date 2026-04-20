@@ -250,13 +250,14 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   // CATEGORY ORDERING
   // ============================
   // Returns categories in the venue's saved display order.
-  // Any categories not yet in the saved order (new ones) get appended alphabetically.
+  // Includes saved empty categories (so newly-created empty ones show up),
+  // and appends any categories present in the menu but not yet saved.
   const orderedCategories = () => {
     const saved = Array.isArray(venue?.category_order) ? venue.category_order : [];
     const present = Array.from(new Set(menu.map((m) => m.category)));
-    const ordered = saved.filter((c) => present.includes(c));
+    // Keep ALL saved categories (even empty ones), then append items-with-unknown-category
     const extras = present.filter((c) => !saved.includes(c)).sort();
-    return [...ordered, ...extras];
+    return [...saved, ...extras];
   };
 
   const persistCategoryOrder = async (newOrder) => {
@@ -328,6 +329,26 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     showSaved(`Removed "${cat}"`);
   };
 
+  // Create a new empty category — adds it to the venue's category_order array
+  // so it appears in the admin UI even before any items exist.
+  const handleCreateEmptyCategory = async () => {
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
+    const current = orderedCategories();
+    // Prevent duplicates
+    if (current.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      showSaved("Category already exists");
+      setShowNewCategory(false);
+      setNewCategory("");
+      return;
+    }
+    const newOrder = [...current, trimmed];
+    await persistCategoryOrder(newOrder);
+    setShowNewCategory(false);
+    setNewCategory("");
+    showSaved(`Created "${trimmed}"`);
+  };
+
   // ============================
   // ITEM HANDLERS (unchanged)
   // ============================
@@ -393,22 +414,14 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             onChange={(e) => setNewCategory(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && newCategory.trim()) {
-                setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 });
-                setShowNewCategory(false);
-                setNewCategory("");
+                handleCreateEmptyCategory();
               }
             }}
             autoFocus
             style={S.input}
           />
           <button
-            onClick={() => {
-              if (newCategory.trim()) {
-                setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 });
-                setShowNewCategory(false);
-                setNewCategory("");
-              }
-            }}
+            onClick={handleCreateEmptyCategory}
             style={S.smallBtn}
           >
             CREATE

@@ -12,6 +12,10 @@
  * - Subscription statuses
  * - Platform-wide order/revenue metrics
  * - Ability to activate/suspend venues
+ * 
+ * Menu builder includes full category management:
+ * rename, delete, reorder, create empty, plus
+ * per-item modifier groups and station tagging.
  * ============================================
  */
 
@@ -24,8 +28,92 @@ import BillingView from "./BillingView";
 // Hardcode your admin email — only this email can access master admin
 const MASTER_ADMIN_EMAIL = "atimelssconcept@gmail.com";
 
-// Inline menu builder for master admin (with modifier management)
-function MasterMenuBuilder({ venue, onBack }) {
+// ============================================
+// CATEGORY HEADER — inline-editable with reorder/delete controls
+// ============================================
+function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(cat);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== cat) {
+      onRename(trimmed);
+    } else {
+      setDraft(cat);
+    }
+  };
+
+  const cancel = () => {
+    setEditing(false);
+    setDraft(cat);
+  };
+
+  return (
+    <div style={MS.categoryHeaderRow}>
+      {editing ? (
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") cancel();
+          }}
+          autoFocus
+          style={MS.categoryHeaderInput}
+        />
+      ) : (
+        <h4
+          style={MS.categoryHeaderText}
+          onClick={() => setEditing(true)}
+          title="Click to rename"
+        >
+          {cat} <span style={MS.categoryItemCount}>({itemCount})</span>
+        </h4>
+      )}
+      <div style={MS.categoryControls}>
+        <button
+          onClick={onMoveUp}
+          disabled={!canMoveUp}
+          style={{ ...MS.categoryCtrlBtn, color: canMoveUp ? "#d4a843" : "#333", cursor: canMoveUp ? "pointer" : "not-allowed" }}
+          title="Move up"
+        >
+          ↑
+        </button>
+        <button
+          onClick={onMoveDown}
+          disabled={!canMoveDown}
+          style={{ ...MS.categoryCtrlBtn, color: canMoveDown ? "#d4a843" : "#333", cursor: canMoveDown ? "pointer" : "not-allowed" }}
+          title="Move down"
+        >
+          ↓
+        </button>
+        <button
+          onClick={() => setEditing(true)}
+          style={{ ...MS.categoryCtrlBtn, color: "#888" }}
+          title="Rename"
+        >
+          ✏️
+        </button>
+        <button
+          onClick={onDelete}
+          style={{ ...MS.categoryCtrlBtn, color: "#e74c3c", borderColor: "#e74c3c44" }}
+          title="Delete category"
+        >
+          🗑
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// MASTER MENU BUILDER — with category management + modifier editing
+// ============================================
+function MasterMenuBuilder({ venue, setManagedVenue, onBack }) {
   const [menu, setMenu] = useState([]);
   const [editingItem, setEditingItem] = useState(null);
   const [newItem, setNewItem] = useState(null);
@@ -34,7 +122,7 @@ function MasterMenuBuilder({ venue, onBack }) {
   const [saveMsg, setSaveMsg] = useState(null);
 
   // Modifier state
-  const [modifierItemId, setModifierItemId] = useState(null); // Which item's modifiers are we editing?
+  const [modifierItemId, setModifierItemId] = useState(null);
   const [modGroups, setModGroups] = useState([]);
   const [editingGroup, setEditingGroup] = useState(null);
   const [editingOption, setEditingOption] = useState(null);
@@ -57,6 +145,102 @@ function MasterMenuBuilder({ venue, onBack }) {
 
   const flash = (msg) => { setSaveMsg(msg); setTimeout(() => setSaveMsg(null), 2000); };
 
+  // ============================
+  // CATEGORY MANAGEMENT
+  // ============================
+  const orderedCategories = () => {
+    const saved = Array.isArray(venue?.category_order) ? venue.category_order : [];
+    const present = Array.from(new Set(menu.map((m) => m.category)));
+    const extras = present.filter((c) => !saved.includes(c)).sort();
+    return [...saved, ...extras];
+  };
+
+  const persistCategoryOrder = async (newOrder) => {
+    const { error } = await supabase
+      .from("venues")
+      .update({ category_order: newOrder })
+      .eq("id", venue.id);
+    if (error) {
+      console.error("Category order save failed:", error);
+      flash("Order save failed");
+      return;
+    }
+    if (setManagedVenue) {
+      setManagedVenue((prev) => ({ ...prev, category_order: newOrder }));
+    }
+  };
+
+  const moveCategory = async (cat, direction) => {
+    const current = orderedCategories();
+    const idx = current.indexOf(cat);
+    if (idx === -1) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= current.length) return;
+    const reordered = [...current];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    await persistCategoryOrder(reordered);
+  };
+
+  const renameCategory = async (oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed || trimmed === oldName) return;
+    const exists = menu.some((m) => m.category === trimmed);
+    if (exists) {
+      if (!confirm(`Category "${trimmed}" already exists. Merge "${oldName}" into it?`)) return;
+    }
+    const { error } = await supabase
+      .from("menus")
+      .update({ category: trimmed })
+      .eq("venue_id", venue.id)
+      .eq("category", oldName);
+    if (error) { flash("Rename failed"); return; }
+    const current = orderedCategories();
+    const updatedOrder = Array.from(new Set(current.map((c) => (c === oldName ? trimmed : c))));
+    await persistCategoryOrder(updatedOrder);
+    await loadMenu();
+    flash(`Renamed to "${trimmed}"`);
+  };
+
+  const deleteCategory = async (cat) => {
+    const itemsInCat = menu.filter((m) => m.category === cat);
+    const confirmText = itemsInCat.length > 0
+      ? `Delete "${cat}" and all ${itemsInCat.length} item${itemsInCat.length === 1 ? "" : "s"} inside it? This cannot be undone.`
+      : `Delete empty category "${cat}"?`;
+    if (!confirm(confirmText)) return;
+    if (itemsInCat.length > 0) {
+      const { error } = await supabase
+        .from("menus")
+        .delete()
+        .eq("venue_id", venue.id)
+        .eq("category", cat);
+      if (error) { flash("Delete failed"); return; }
+    }
+    const current = orderedCategories().filter((c) => c !== cat);
+    await persistCategoryOrder(current);
+    await loadMenu();
+    flash(`Removed "${cat}"`);
+  };
+
+  const handleCreateEmptyCategory = async () => {
+    const trimmed = newCategory.trim();
+    if (!trimmed) return;
+    const current = orderedCategories();
+    if (current.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
+      flash("Category already exists");
+      setShowNewCategory(false);
+      setNewCategory("");
+      return;
+    }
+    const newOrder = [...current, trimmed];
+    await persistCategoryOrder(newOrder);
+    setShowNewCategory(false);
+    setNewCategory("");
+    flash(`Created "${trimmed}"`);
+  };
+
+  // ============================
+  // ITEM MANAGEMENT (unchanged)
+  // ============================
   const handleSave = async (item) => {
     if (item.id) {
       await supabase.from("menus").update({ item_name: item.item_name, description: item.description, price_cents: item.price_cents, category: item.category, sort_order: item.sort_order, active: item.active, station: item.station || "all" }).eq("id", item.id);
@@ -69,7 +253,9 @@ function MasterMenuBuilder({ venue, onBack }) {
   const handleDelete = async (id) => { if (!confirm("Remove?")) return; await supabase.from("menus").delete().eq("id", id); await loadMenu(); flash("Removed"); };
   const handleToggle = async (item) => { await supabase.from("menus").update({ active: !item.active }).eq("id", item.id); await loadMenu(); flash(item.active ? "Hidden" : "Visible"); };
 
-  // Modifier CRUD
+  // ============================
+  // MODIFIER CRUD (unchanged)
+  // ============================
   const addModGroup = async () => {
     if (!newGroupName.trim()) return;
     await supabase.from("menu_modifiers").insert({ menu_item_id: modifierItemId, group_name: newGroupName.trim(), required: false, max_selections: 1, sort_order: modGroups.length + 1 });
@@ -112,7 +298,7 @@ function MasterMenuBuilder({ venue, onBack }) {
     flash("Option removed");
   };
 
-  const categories = [...new Set(menu.map((m) => m.category))];
+  const ordered = orderedCategories();
   const modifierItem = menu.find((m) => m.id === modifierItemId);
 
   // ---- MODIFIER EDITING VIEW ----
@@ -205,9 +391,40 @@ function MasterMenuBuilder({ venue, onBack }) {
       </div>
       <h3 style={MS.manageTitle}>Menu — {venue.name}</h3>
 
-      {categories.map((cat) => (
+      {/* NEW CATEGORY BUTTON — MOVED TO TOP */}
+      {showNewCategory ? (
+        <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+          <input
+            placeholder="Category name (e.g., Signature Cocktails)"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && newCategory.trim()) handleCreateEmptyCategory(); }}
+            autoFocus
+            style={MS.input}
+          />
+          <button onClick={handleCreateEmptyCategory} style={MS.saveBtn}>CREATE</button>
+          <button onClick={() => { setShowNewCategory(false); setNewCategory(""); }} style={MS.dimBtn}>CANCEL</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowNewCategory(true)} style={{ ...MS.addCategoryBtn, marginBottom: 20 }}>
+          + New Category
+        </button>
+      )}
+
+      {/* EXISTING CATEGORIES WITH MANAGEMENT CONTROLS */}
+      {ordered.map((cat, catIdx) => (
         <div key={cat} style={{ marginBottom: 24 }}>
-          <h4 style={MS.catHeader}>{cat}</h4>
+          <CategoryHeader
+            cat={cat}
+            itemCount={menu.filter((m) => m.category === cat).length}
+            onRename={(newName) => renameCategory(cat, newName)}
+            onDelete={() => deleteCategory(cat)}
+            onMoveUp={() => moveCategory(cat, "up")}
+            onMoveDown={() => moveCategory(cat, "down")}
+            canMoveUp={catIdx > 0}
+            canMoveDown={catIdx < ordered.length - 1}
+          />
+
           {menu.filter((m) => m.category === cat).map((item) =>
             editingItem?.id === item.id ? (
               <div key={item.id} style={MS.editCard}>
@@ -223,6 +440,12 @@ function MasterMenuBuilder({ venue, onBack }) {
                     <option value="bar">Bar (21+)</option>
                     <option value="non-alc">Non-Alcoholic</option>
                     <option value="kitchen">Kitchen</option>
+                  </select>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <label style={{ fontSize: 9, color: "#888", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>CATEGORY:</label>
+                  <select value={editingItem.category} onChange={(e) => setEditingItem({ ...editingItem, category: e.target.value })} style={{ ...MS.input, flex: 1, padding: "6px 8px", fontSize: 12 }}>
+                    {ordered.map((c) => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -247,7 +470,7 @@ function MasterMenuBuilder({ venue, onBack }) {
               </div>
             )
           )}
-          <button onClick={() => setNewItem({ item_name: "", description: "", price_cents: 0, category: cat, sort_order: menu.filter((m) => m.category === cat).length + 1 })} style={MS.addBtn}>+ Add to {cat}</button>
+          <button onClick={() => setNewItem({ item_name: "", description: "", price_cents: 0, category: cat, sort_order: menu.filter((m) => m.category === cat).length + 1, station: "bar" })} style={MS.addBtn}>+ Add to {cat}</button>
         </div>
       ))}
 
@@ -256,21 +479,19 @@ function MasterMenuBuilder({ venue, onBack }) {
           <input placeholder="Name" value={newItem.item_name} onChange={(e) => setNewItem({ ...newItem, item_name: e.target.value })} style={MS.input} />
           <input placeholder="Description" value={newItem.description || ""} onChange={(e) => setNewItem({ ...newItem, description: e.target.value })} style={MS.input} />
           <input type="number" step="0.01" placeholder="Price" value={newItem.price_cents ? (newItem.price_cents / 100).toFixed(2) : ""} onChange={(e) => setNewItem({ ...newItem, price_cents: Math.round(parseFloat(e.target.value || 0) * 100) })} style={MS.input} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label style={{ fontSize: 9, color: "#888", fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>STATION:</label>
+            <select value={newItem.station || "bar"} onChange={(e) => setNewItem({ ...newItem, station: e.target.value })} style={{ ...MS.input, width: 140, padding: "6px 8px", fontSize: 12 }}>
+              <option value="bar">Bar (21+)</option>
+              <option value="non-alc">Non-Alcoholic</option>
+              <option value="kitchen">Kitchen</option>
+            </select>
+          </div>
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setNewItem(null)} style={MS.dimBtn}>CANCEL</button>
             <button onClick={() => handleSave(newItem)} style={MS.saveBtn}>SAVE</button>
           </div>
         </div>
-      )}
-
-      {showNewCategory ? (
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <input placeholder="Category name" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} style={MS.input} />
-          <button onClick={() => { if (newCategory.trim()) { setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 }); setShowNewCategory(false); setNewCategory(""); }}} style={MS.saveBtn}>CREATE</button>
-          <button onClick={() => { setShowNewCategory(false); setNewCategory(""); }} style={MS.dimBtn}>CANCEL</button>
-        </div>
-      ) : (
-        <button onClick={() => setShowNewCategory(true)} style={{ ...MS.addBtn, marginTop: 12 }}>+ New Category</button>
       )}
     </div>
   );
@@ -360,7 +581,7 @@ export default function MasterAdmin() {
 
   // Manage mode — full admin for a specific venue
   const [managedVenue, setManagedVenue] = useState(null);
-  const [manageTab, setManageTab] = useState("analytics"); // analytics | menu | settings | qr | billing
+  const [manageTab, setManageTab] = useState("analytics");
 
   // Check session
   useEffect(() => {
@@ -381,7 +602,6 @@ export default function MasterAdmin() {
   async function loadPlatformData() {
     setLoading(true);
 
-    // Get all venues
     const { data: venueData } = await supabase
       .from("venues")
       .select("*")
@@ -389,7 +609,6 @@ export default function MasterAdmin() {
 
     if (venueData) setVenues(venueData);
 
-    // Get platform-wide order stats (last 30 days)
     const thirtyDaysAgo = new Date();
     thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
@@ -497,9 +716,7 @@ export default function MasterAdmin() {
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       ) : managedVenue ? (
-        /* ---- MANAGE MODE — full admin for a single venue ---- */
         <div style={{ padding: "20px 0" }}>
-          {/* Manage header */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "12px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1E4D8C33" }}>
             <div>
               <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 2 }}>{managedVenue.name?.toUpperCase()}</span>
@@ -508,7 +725,6 @@ export default function MasterAdmin() {
             <button onClick={() => { setManagedVenue(null); loadPlatformData(); }} style={S.actionBtn}>← ALL VENUES</button>
           </div>
 
-          {/* Manage tabs */}
           <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto" }}>
             {[
               { key: "analytics", label: "Analytics" },
@@ -525,15 +741,13 @@ export default function MasterAdmin() {
             ))}
           </div>
 
-          {/* Manage content */}
           {manageTab === "analytics" && <AnalyticsView venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
-          {manageTab === "menu" && <MasterMenuBuilder venue={managedVenue} onBack={() => setManageTab("analytics")} />}
+          {manageTab === "menu" && <MasterMenuBuilder venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
           {manageTab === "settings" && <MasterVenueSettings venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
           {manageTab === "qr" && <QRGenerator venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} embedded={true} />}
         </div>
       ) : (
         <>
-          {/* Platform KPIs */}
           {platformStats && (
             <div style={S.kpiGrid}>
               <div style={S.kpiCard}>
@@ -558,7 +772,6 @@ export default function MasterAdmin() {
             </div>
           )}
 
-          {/* Venue list */}
           <div style={S.section}>
             <div style={S.sectionHeader}>
               <h2 style={S.sectionTitle}>All Venues</h2>
@@ -641,7 +854,6 @@ export default function MasterAdmin() {
                     <button onClick={() => { setManagedVenue(v); setManageTab("analytics"); }} style={S.manageBtn}>MANAGE</button>
                   </div>
 
-                  {/* Expanded order view */}
                   {selectedVenue?.id === v.id && (
                     <div style={S.orderExpand}>
                       <h4 style={S.orderExpandTitle}>Recent Orders — {v.name}</h4>
@@ -828,6 +1040,32 @@ const MS = {
   backBtn: { background: "transparent", border: "1px solid #333", borderRadius: 8, padding: "6px 14px", color: "#888", fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer" },
   flash: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#2ecc71", letterSpacing: 2, padding: "4px 10px", background: "#2ecc7115", borderRadius: 6, border: "1px solid #2ecc7133" },
   manageTitle: { fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 2, marginBottom: 16 },
+
+  // NEW: category header with management controls
+  categoryHeaderRow: {
+    display: "flex", alignItems: "center", gap: 8, marginBottom: 10, paddingBottom: 6,
+    borderBottom: "1px solid #d4a8431a",
+  },
+  categoryHeaderText: {
+    flex: 1, margin: 0, fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
+    letterSpacing: 3, color: "#d4a843", textTransform: "uppercase", cursor: "pointer",
+  },
+  categoryItemCount: {
+    fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666",
+    letterSpacing: 1, marginLeft: 4, textTransform: "none",
+  },
+  categoryHeaderInput: {
+    flex: 1, padding: "4px 8px", background: "#141414", border: "1px solid #d4a843",
+    borderRadius: 4, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12,
+    letterSpacing: 3, textTransform: "uppercase", outline: "none",
+  },
+  categoryControls: { display: "flex", gap: 3 },
+  categoryCtrlBtn: {
+    background: "transparent", border: "1px solid #333", borderRadius: 4,
+    width: 24, height: 24, fontSize: 11, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+
   catHeader: { fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 3, color: "#d4a843", textTransform: "uppercase", marginBottom: 8, paddingBottom: 6, borderBottom: "1px solid #d4a8431a" },
   itemRow: { display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#0a0a0a", borderRadius: 8, border: "1px solid #1a1a1a", marginBottom: 4 },
   itemName: { fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 500, display: "block" },
@@ -835,6 +1073,7 @@ const MS = {
   itemPrice: { fontFamily: "'Space Mono', monospace", fontSize: 12, color: "#d4a843" },
   iconBtn: { background: "transparent", border: "none", fontSize: 13, cursor: "pointer", padding: 4, filter: "grayscale(0.5)" },
   addBtn: { width: "100%", padding: "8px", borderRadius: 6, border: "1px dashed #333", background: "transparent", color: "#666", fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer" },
+  addCategoryBtn: { padding: "10px 16px", borderRadius: 8, border: "1px dashed #d4a84366", background: "#d4a84308", color: "#d4a843", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500, letterSpacing: 2, cursor: "pointer", width: "100%" },
   editCard: { padding: 14, background: "#0a0a0a", borderRadius: 10, border: "1px solid #1E4D8C44", display: "flex", flexDirection: "column", gap: 8, marginBottom: 6 },
   input: { padding: "10px", background: "#141414", border: "1px solid #222", borderRadius: 6, color: "#f5f5f5", fontFamily: "'Inter', sans-serif", fontSize: 13, outline: "none", width: "100%" },
   label: { display: "block", fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#888", letterSpacing: 1, textTransform: "uppercase", marginBottom: 4 },

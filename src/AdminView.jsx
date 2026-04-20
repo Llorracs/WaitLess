@@ -12,6 +12,7 @@
  * - Edit venue name, tagline, brand colors
  * - Set bartender PIN and service fee
  * - Add/edit/remove/reorder menu items
+ * - Rename, delete, reorder menu CATEGORIES
  * - Enter Square credentials
  * ============================================
  */
@@ -207,7 +208,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <AnalyticsView venue={venue} BRAND={BRAND} />
         )}
         {activeTab === "menu" && (
-          <MenuBuilder venue={venue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} />
+          <MenuBuilder venue={venue} setVenue={setVenue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} />
         )}
         {activeTab === "settings" && (
           <VenueSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
@@ -239,14 +240,97 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
 // ============================================
 // MENU BUILDER
 // ============================================
-function MenuBuilder({ venue, menu, setMenu, onSave, showSaved, BRAND }) {
+function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND }) {
   const [editingItem, setEditingItem] = useState(null);
   const [newItem, setNewItem] = useState(null);
   const [newCategory, setNewCategory] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
 
-  const categories = [...new Set(menu.map((m) => m.category))];
+  // ============================
+  // CATEGORY ORDERING
+  // ============================
+  // Returns categories in the venue's saved display order.
+  // Any categories not yet in the saved order (new ones) get appended alphabetically.
+  const orderedCategories = () => {
+    const saved = Array.isArray(venue?.category_order) ? venue.category_order : [];
+    const present = Array.from(new Set(menu.map((m) => m.category)));
+    const ordered = saved.filter((c) => present.includes(c));
+    const extras = present.filter((c) => !saved.includes(c)).sort();
+    return [...ordered, ...extras];
+  };
 
+  const persistCategoryOrder = async (newOrder) => {
+    const { error } = await supabase
+      .from("venues")
+      .update({ category_order: newOrder })
+      .eq("id", venue.id);
+    if (error) {
+      console.error("Category order save failed:", error);
+      showSaved("Order save failed");
+      return;
+    }
+    setVenue((prev) => ({ ...prev, category_order: newOrder }));
+  };
+
+  const moveCategory = async (cat, direction) => {
+    const current = orderedCategories();
+    const idx = current.indexOf(cat);
+    if (idx === -1) return;
+    const newIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= current.length) return;
+    const reordered = [...current];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    await persistCategoryOrder(reordered);
+  };
+
+  const renameCategory = async (oldName, newName) => {
+    const trimmed = (newName || "").trim();
+    if (!trimmed || trimmed === oldName) return;
+    // Check for collision — if new name already exists, items would merge (which is fine, but warn)
+    const exists = menu.some((m) => m.category === trimmed);
+    if (exists) {
+      if (!confirm(`Category "${trimmed}" already exists. Merge "${oldName}" into it?`)) return;
+    }
+    // Update every menu item in that category
+    const { error } = await supabase
+      .from("menus")
+      .update({ category: trimmed })
+      .eq("venue_id", venue.id)
+      .eq("category", oldName);
+    if (error) { showSaved("Rename failed"); return; }
+    // Update saved order array — swap the name, de-duplicate if merging
+    const current = orderedCategories();
+    const updatedOrder = Array.from(new Set(current.map((c) => (c === oldName ? trimmed : c))));
+    await persistCategoryOrder(updatedOrder);
+    await onSave();
+    showSaved(`Renamed to "${trimmed}"`);
+  };
+
+  const deleteCategory = async (cat) => {
+    const itemsInCat = menu.filter((m) => m.category === cat);
+    const confirmText = itemsInCat.length > 0
+      ? `Delete "${cat}" and all ${itemsInCat.length} item${itemsInCat.length === 1 ? "" : "s"} inside it? This cannot be undone.`
+      : `Delete empty category "${cat}"?`;
+    if (!confirm(confirmText)) return;
+    // Delete all items in the category (if any)
+    if (itemsInCat.length > 0) {
+      const { error } = await supabase
+        .from("menus")
+        .delete()
+        .eq("venue_id", venue.id)
+        .eq("category", cat);
+      if (error) { showSaved("Delete failed"); return; }
+    }
+    // Remove from saved order
+    const current = orderedCategories().filter((c) => c !== cat);
+    await persistCategoryOrder(current);
+    await onSave();
+    showSaved(`Removed "${cat}"`);
+  };
+
+  // ============================
+  // ITEM HANDLERS (unchanged)
+  // ============================
   const handleSaveItem = async (item) => {
     if (item.id) {
       // Update existing
@@ -295,18 +379,68 @@ function MenuBuilder({ venue, menu, setMenu, onSave, showSaved, BRAND }) {
     if (!error) { await onSave(); showSaved(item.active ? "Item hidden" : "Item visible"); }
   };
 
+  const ordered = orderedCategories();
+
   return (
     <div>
-      {categories.map((cat) => (
+      {/* NEW CATEGORY BUTTON — MOVED TO TOP */}
+      {showNewCategory ? (
+        <div style={{ ...S.newCategoryRow, marginTop: 0, marginBottom: 24 }}>
+          <input
+            type="text"
+            placeholder="Category name (e.g., Signature Cocktails)"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newCategory.trim()) {
+                setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 });
+                setShowNewCategory(false);
+                setNewCategory("");
+              }
+            }}
+            autoFocus
+            style={S.input}
+          />
+          <button
+            onClick={() => {
+              if (newCategory.trim()) {
+                setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 });
+                setShowNewCategory(false);
+                setNewCategory("");
+              }
+            }}
+            style={S.smallBtn}
+          >
+            CREATE
+          </button>
+          <button onClick={() => { setShowNewCategory(false); setNewCategory(""); }} style={S.smallBtnDim}>CANCEL</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowNewCategory(true)} style={{ ...S.addCategoryBtn, marginTop: 0, marginBottom: 24, width: "100%" }}>
+          + New Category
+        </button>
+      )}
+
+      {/* EXISTING CATEGORIES WITH MANAGEMENT CONTROLS */}
+      {ordered.map((cat, catIdx) => (
         <div key={cat} style={S.menuSection}>
-          <h3 style={S.menuCategoryHeader}>{cat}</h3>
+          <CategoryHeader
+            cat={cat}
+            itemCount={menu.filter((m) => m.category === cat).length}
+            onRename={(newName) => renameCategory(cat, newName)}
+            onDelete={() => deleteCategory(cat)}
+            onMoveUp={() => moveCategory(cat, "up")}
+            onMoveDown={() => moveCategory(cat, "down")}
+            canMoveUp={catIdx > 0}
+            canMoveDown={catIdx < ordered.length - 1}
+          />
 
           {menu.filter((m) => m.category === cat).map((item) => (
             editingItem?.id === item.id ? (
               <ItemEditor
                 key={item.id}
                 item={editingItem}
-                categories={categories}
+                categories={ordered}
                 onChange={setEditingItem}
                 onSave={() => handleSaveItem(editingItem)}
                 onCancel={() => setEditingItem(null)}
@@ -339,48 +473,100 @@ function MenuBuilder({ venue, menu, setMenu, onSave, showSaved, BRAND }) {
         </div>
       ))}
 
-      {/* New item editor (for existing categories) */}
+      {/* New item editor (for existing categories or brand-new ones) */}
       {newItem && (
         <div style={S.menuSection}>
           <ItemEditor
             item={newItem}
-            categories={categories}
+            categories={ordered.length > 0 ? ordered : [newItem.category]}
             onChange={setNewItem}
             onSave={() => handleSaveItem(newItem)}
             onCancel={() => setNewItem(null)}
           />
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* Add new category */}
-      {showNewCategory ? (
-        <div style={S.newCategoryRow}>
-          <input
-            type="text"
-            placeholder="Category name"
-            value={newCategory}
-            onChange={(e) => setNewCategory(e.target.value)}
-            style={S.input}
-          />
-          <button
-            onClick={() => {
-              if (newCategory.trim()) {
-                setNewItem({ item_name: "", description: "", price_cents: 0, category: newCategory.trim(), sort_order: 1 });
-                setShowNewCategory(false);
-                setNewCategory("");
-              }
-            }}
-            style={S.smallBtn}
-          >
-            CREATE
-          </button>
-          <button onClick={() => { setShowNewCategory(false); setNewCategory(""); }} style={S.smallBtnDim}>CANCEL</button>
-        </div>
+// ============================================
+// CATEGORY HEADER — with inline rename + reorder + delete controls
+// ============================================
+function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(cat);
+
+  const commit = () => {
+    setEditing(false);
+    const trimmed = draft.trim();
+    if (trimmed && trimmed !== cat) {
+      onRename(trimmed);
+    } else {
+      setDraft(cat);
+    }
+  };
+
+  const cancel = () => {
+    setEditing(false);
+    setDraft(cat);
+  };
+
+  return (
+    <div style={S.categoryHeaderRow}>
+      {editing ? (
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") commit();
+            if (e.key === "Escape") cancel();
+          }}
+          autoFocus
+          style={S.categoryHeaderInput}
+        />
       ) : (
-        <button onClick={() => setShowNewCategory(true)} style={S.addCategoryBtn}>
-          + New Category
-        </button>
+        <h3
+          style={S.categoryHeaderText}
+          onClick={() => setEditing(true)}
+          title="Click to rename"
+        >
+          {cat} <span style={S.categoryItemCount}>({itemCount})</span>
+        </h3>
       )}
+      <div style={S.categoryControls}>
+        <button
+          onClick={onMoveUp}
+          disabled={!canMoveUp}
+          style={{ ...S.categoryCtrlBtn, color: canMoveUp ? "#d4a843" : "#333", cursor: canMoveUp ? "pointer" : "not-allowed" }}
+          title="Move category up"
+        >
+          ↑
+        </button>
+        <button
+          onClick={onMoveDown}
+          disabled={!canMoveDown}
+          style={{ ...S.categoryCtrlBtn, color: canMoveDown ? "#d4a843" : "#333", cursor: canMoveDown ? "pointer" : "not-allowed" }}
+          title="Move category down"
+        >
+          ↓
+        </button>
+        <button
+          onClick={() => setEditing(true)}
+          style={{ ...S.categoryCtrlBtn, color: "#888" }}
+          title="Rename category"
+        >
+          ✏️
+        </button>
+        <button
+          onClick={onDelete}
+          style={{ ...S.categoryCtrlBtn, color: "#e74c3c", borderColor: "#e74c3c44" }}
+          title="Delete category"
+        >
+          🗑
+        </button>
+      </div>
     </div>
   );
 }
@@ -805,6 +991,32 @@ const S = {
     color: "#d4a843", textTransform: "uppercase", marginBottom: 12, paddingBottom: 8,
     borderBottom: "1px solid #d4a8434d",
   },
+
+  // NEW: Category header with management controls
+  categoryHeaderRow: {
+    display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8,
+    borderBottom: "1px solid #d4a8434d",
+  },
+  categoryHeaderText: {
+    flex: 1, margin: 0, fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
+    letterSpacing: 4, color: "#d4a843", textTransform: "uppercase", cursor: "pointer",
+  },
+  categoryItemCount: {
+    fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666",
+    letterSpacing: 1, marginLeft: 6, textTransform: "none",
+  },
+  categoryHeaderInput: {
+    flex: 1, padding: "6px 10px", background: "#141414", border: "1px solid #d4a843",
+    borderRadius: 6, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 13,
+    letterSpacing: 4, textTransform: "uppercase", outline: "none",
+  },
+  categoryControls: { display: "flex", gap: 4 },
+  categoryCtrlBtn: {
+    background: "transparent", border: "1px solid #333", borderRadius: 6,
+    width: 28, height: 28, fontSize: 12, padding: 0,
+    display: "flex", alignItems: "center", justifyContent: "center",
+  },
+
   menuRow: {
     display: "flex", justifyContent: "space-between", alignItems: "center",
     padding: "12px 14px", background: "#1a1a1a", borderRadius: 10, border: "1px solid #222", marginBottom: 6,
@@ -824,8 +1036,8 @@ const S = {
     fontSize: 11, letterSpacing: 1, cursor: "pointer", marginTop: 6,
   },
   addCategoryBtn: {
-    padding: "12px 20px", borderRadius: 10, border: "1px dashed #444",
-    background: "transparent", color: "#888", fontFamily: "'Oswald', sans-serif",
+    padding: "12px 20px", borderRadius: 10, border: "1px dashed #d4a84366",
+    background: "#d4a84308", color: "#d4a843", fontFamily: "'Oswald', sans-serif",
     fontSize: 14, fontWeight: 500, letterSpacing: 2, cursor: "pointer", marginTop: 8,
   },
 

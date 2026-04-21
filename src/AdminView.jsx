@@ -364,6 +364,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           category: item.category,
           sort_order: item.sort_order,
           active: item.active,
+          station: item.station || "bar",
         })
         .eq("id", item.id);
       if (!error) { await onSave(); showSaved("Item updated"); }
@@ -379,6 +380,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           category: item.category,
           sort_order: item.sort_order || 0,
           active: true,
+          station: item.station || "bar",
         });
       if (!error) { await onSave(); showSaved("Item added"); }
     }
@@ -478,7 +480,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
 
           {/* Add item to this category */}
           <button
-            onClick={() => setNewItem({ item_name: "", description: "", price_cents: 0, category: cat, sort_order: menu.filter((m) => m.category === cat).length + 1 })}
+            onClick={() => setNewItem({ item_name: "", description: "", price_cents: 0, category: cat, sort_order: menu.filter((m) => m.category === cat).length + 1, station: "bar" })}
             style={S.addItemBtn}
           >
             + Add item to {cat}
@@ -634,6 +636,37 @@ function ItemEditor({ item, categories, onChange, onSave, onCancel }) {
             onChange={(e) => onChange({ ...item, sort_order: parseInt(e.target.value || 0) })}
             style={{ ...S.input, width: 60 }}
           />
+        </div>
+      </div>
+      <div style={S.editorField}>
+        <label style={S.label}>Station</label>
+        <div style={{ display: "flex", gap: 6 }}>
+          {[
+            { value: "bar", label: "Bar (21+)", color: "#e91e8c" },
+            { value: "non-alc", label: "Non-Alcoholic", color: "#d4a843" },
+            { value: "kitchen", label: "Kitchen", color: "#2ecc71" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => onChange({ ...item, station: opt.value })}
+              style={{
+                flex: 1,
+                padding: "8px 6px",
+                borderRadius: 8,
+                border: `1px solid ${(item.station || "bar") === opt.value ? opt.color : "#333"}`,
+                background: (item.station || "bar") === opt.value ? `${opt.color}22` : "transparent",
+                color: (item.station || "bar") === opt.value ? opt.color : "#888",
+                fontFamily: "'Oswald', sans-serif",
+                fontSize: 11,
+                fontWeight: 600,
+                letterSpacing: 1,
+                cursor: "pointer",
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
       </div>
       <div style={S.editorActions}>

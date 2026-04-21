@@ -10,9 +10,12 @@
  * Multi-step flow:
  * 1. Create account (email + password)
  * 2. Set up venue (name, slug, tagline)
- * 3. Add menu items
+ * 3. Add menu items (with station tag)
  * 4. Configure branding
  * 5. Go live
+ * 
+ * If a user is ALREADY logged in when they hit this page, we show
+ * a confirmation prompt rather than silently continuing as that user.
  * ============================================
  */
 
@@ -26,16 +29,32 @@ export default function OnboardingView({ BRAND }) {
   const [user, setUser] = useState(null);
   const [venue, setVenue] = useState(null);
   const [error, setError] = useState(null);
+  const [sessionCheckDone, setSessionCheckDone] = useState(false);
+  const [existingSession, setExistingSession] = useState(null); // If logged in when landing
 
-  // Check for existing session (in case they refresh mid-flow)
+  // Check for existing session — but DON'T auto-advance.
+  // Instead, stash the session so we can show the user a prompt.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
-        setUser(session.user);
-        setStep(1); // Skip account step
+        setExistingSession(session.user);
       }
+      setSessionCheckDone(true);
     });
   }, []);
+
+  const handleContinueAsExisting = () => {
+    setUser(existingSession);
+    setExistingSession(null);
+    setStep(1);
+  };
+
+  const handleLogOutAndRestart = async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setExistingSession(null);
+    setStep(0);
+  };
 
   return (
     <div style={S.page}>
@@ -66,14 +85,42 @@ export default function OnboardingView({ BRAND }) {
 
       {/* Steps */}
       <div style={S.content}>
-        {step === 0 && (
+        {/* Session check still loading */}
+        {!sessionCheckDone && (
+          <div style={S.stepCard}>
+            <p style={S.stepDesc}>Loading…</p>
+          </div>
+        )}
+
+        {/* Existing session prompt */}
+        {sessionCheckDone && existingSession && (
+          <div style={S.stepCard}>
+            <h2 style={S.stepTitle}>You're Already Signed In</h2>
+            <p style={S.stepDesc}>
+              You're currently signed in as <strong style={{ color: "#d4a843" }}>{existingSession.email}</strong>.
+              How would you like to proceed?
+            </p>
+            <button onClick={handleContinueAsExisting} style={S.primaryBtn}>
+              CONTINUE AS {existingSession.email?.toUpperCase().split("@")[0]}
+            </button>
+            <button onClick={handleLogOutAndRestart} style={S.secondaryBtn}>
+              LOG OUT & CREATE NEW ACCOUNT
+            </button>
+            <p style={{ ...S.altAuth, marginTop: 4 }}>
+              If you're setting up a new venue for someone else, choose the second option.
+            </p>
+          </div>
+        )}
+
+        {/* Normal flow */}
+        {sessionCheckDone && !existingSession && step === 0 && (
           <AccountStep
             onComplete={(u) => { setUser(u); setStep(1); }}
             error={error}
             setError={setError}
           />
         )}
-        {step === 1 && (
+        {sessionCheckDone && !existingSession && step === 1 && user && (
           <VenueStep
             user={user}
             onComplete={(v) => { setVenue(v); setStep(2); }}
@@ -81,20 +128,20 @@ export default function OnboardingView({ BRAND }) {
             setError={setError}
           />
         )}
-        {step === 2 && venue && (
+        {sessionCheckDone && !existingSession && step === 2 && venue && (
           <MenuStep
             venue={venue}
             onComplete={() => setStep(3)}
           />
         )}
-        {step === 3 && venue && (
+        {sessionCheckDone && !existingSession && step === 3 && venue && (
           <BrandingStep
             venue={venue}
             setVenue={setVenue}
             onComplete={() => setStep(4)}
           />
         )}
-        {step === 4 && venue && (
+        {sessionCheckDone && !existingSession && step === 4 && venue && (
           <LaunchStep venue={venue} />
         )}
       </div>
@@ -311,12 +358,15 @@ function MenuStep({ venue, onComplete }) {
   const [itemName, setItemName] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");
+  const [station, setStation] = useState("bar"); // NEW — default to bar since most venues are bars
   const [saving, setSaving] = useState(false);
+  const [menuError, setMenuError] = useState(null);
 
   const handleAddItem = async () => {
     if (!category.trim() || !itemName.trim() || !price) return;
 
     setSaving(true);
+    setMenuError(null);
     const priceCents = Math.round(parseFloat(price) * 100);
     const sortOrder = items.filter((i) => i.category === category.trim()).length + 1;
 
@@ -330,21 +380,33 @@ function MenuStep({ venue, onComplete }) {
         price_cents: priceCents,
         sort_order: sortOrder,
         active: true,
+        station: station, // NEW — now always sent with a valid value
       })
       .select()
       .single();
 
-    if (!error && data) {
+    if (error) {
+      setMenuError(error.message);
+      setSaving(false);
+      return;
+    }
+
+    if (data) {
       setItems((prev) => [...prev, data]);
       setItemName("");
       setDescription("");
       setPrice("");
+      // Keep category and station as-is so user can rapidly add several similar items
     }
     setSaving(false);
   };
 
   const handleRemoveItem = async (id) => {
-    await supabase.from("menus").delete().eq("id", id);
+    const { error } = await supabase.from("menus").delete().eq("id", id);
+    if (error) {
+      setMenuError(error.message);
+      return;
+    }
     setItems((prev) => prev.filter((i) => i.id !== id));
   };
 
@@ -368,6 +430,15 @@ function MenuStep({ venue, onComplete }) {
               {catItems.map((item) => (
                 <div key={item.id} style={S.miniItem}>
                   <span style={S.miniItemName}>{item.item_name}</span>
+                  <span style={{
+                    fontFamily: "'Space Mono', monospace", fontSize: 8, letterSpacing: 1,
+                    padding: "2px 6px", borderRadius: 4,
+                    color: item.station === "bar" ? "#e91e8c" : item.station === "kitchen" ? "#2ecc71" : "#d4a843",
+                    background: item.station === "bar" ? "#e91e8c15" : item.station === "kitchen" ? "#2ecc7115" : "#d4a84315",
+                    border: `1px solid ${item.station === "bar" ? "#e91e8c33" : item.station === "kitchen" ? "#2ecc7133" : "#d4a84333"}`,
+                  }}>
+                    {item.station === "bar" ? "BAR 21+" : item.station === "kitchen" ? "KITCHEN" : "NON-ALC"}
+                  </span>
                   <span style={S.miniItemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
                   <button onClick={() => handleRemoveItem(item.id)} style={S.removeBtn}>✕</button>
                 </div>
@@ -384,7 +455,7 @@ function MenuStep({ venue, onComplete }) {
             <label style={S.label}>Category</label>
             <input
               type="text"
-              placeholder="e.g., Tacos"
+              placeholder="e.g., Tacos, Vodka, Beer"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               style={S.input}
@@ -413,7 +484,7 @@ function MenuStep({ venue, onComplete }) {
           <label style={S.label}>Item Name</label>
           <input
             type="text"
-            placeholder="e.g., Carne Asada Taco"
+            placeholder="e.g., Moscow Mule, Carne Asada Taco"
             value={itemName}
             onChange={(e) => setItemName(e.target.value)}
             style={S.input}
@@ -423,12 +494,49 @@ function MenuStep({ venue, onComplete }) {
           <label style={S.label}>Description (optional)</label>
           <input
             type="text"
-            placeholder="e.g., Grilled steak, cilantro, onion"
+            placeholder="e.g., Vodka, ginger beer, lime"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             style={S.input}
           />
         </div>
+        <div style={S.field}>
+          <label style={S.label}>Station</label>
+          <div style={S.stationRow}>
+            {[
+              { value: "bar", label: "Bar (21+)", color: "#e91e8c" },
+              { value: "non-alc", label: "Non-Alcoholic", color: "#d4a843" },
+              { value: "kitchen", label: "Kitchen", color: "#2ecc71" },
+            ].map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setStation(opt.value)}
+                style={{
+                  flex: 1,
+                  padding: "10px 8px",
+                  borderRadius: 8,
+                  border: `1px solid ${station === opt.value ? opt.color : "#333"}`,
+                  background: station === opt.value ? `${opt.color}22` : "transparent",
+                  color: station === opt.value ? opt.color : "#888",
+                  fontFamily: "'Oswald', sans-serif",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  letterSpacing: 1,
+                  cursor: "pointer",
+                }}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
+            Determines which staff screen shows this item. Bar items trigger age verification for patrons.
+          </span>
+        </div>
+
+        {menuError && <p style={S.error}>{menuError}</p>}
+
         <button onClick={handleAddItem} disabled={saving || !category || !itemName || !price} style={S.secondaryBtn}>
           {saving ? "ADDING..." : "+ ADD ITEM"}
         </button>
@@ -700,6 +808,7 @@ const S = {
     display: "flex", flexDirection: "column", gap: 10,
   },
   addFormRow: { display: "flex", gap: 10 },
+  stationRow: { display: "flex", gap: 6 },
   miniCatHeader: {
     fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600, letterSpacing: 3,
     color: "#d4a843", textTransform: "uppercase", marginBottom: 6, paddingBottom: 4,

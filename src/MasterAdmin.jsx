@@ -127,6 +127,8 @@ function MasterMenuBuilder({ venue, setManagedVenue, onBack }) {
   const [editingGroup, setEditingGroup] = useState(null);
   const [editingOption, setEditingOption] = useState(null);
   const [newGroupName, setNewGroupName] = useState("");
+  const [showCopyPicker, setShowCopyPicker] = useState(false);
+  const [copyCandidates, setCopyCandidates] = useState([]);
 
   useEffect(() => { loadMenu(); }, [venue.id]);
 
@@ -298,6 +300,93 @@ function MasterMenuBuilder({ venue, setManagedVenue, onBack }) {
     flash("Option removed");
   };
 
+  // Copy all modifier groups + options from a source item to the current item.
+  // Uses "add" semantics — existing groups on the target are preserved, new ones appended.
+  const copyModifiersFromItem = async (sourceItemId) => {
+    const { data: sourceGroups, error: gErr } = await supabase
+      .from("menu_modifiers")
+      .select("*")
+      .eq("menu_item_id", sourceItemId)
+      .order("sort_order");
+    if (gErr || !sourceGroups || sourceGroups.length === 0) {
+      flash("Source has no modifiers");
+      setShowCopyPicker(false);
+      return;
+    }
+
+    const sourceGroupIds = sourceGroups.map((g) => g.id);
+    const { data: sourceOptions, error: oErr } = await supabase
+      .from("modifier_options")
+      .select("*")
+      .in("modifier_id", sourceGroupIds)
+      .order("sort_order");
+    if (oErr) { flash("Copy failed"); return; }
+
+    const baseSort = modGroups.length;
+
+    for (let i = 0; i < sourceGroups.length; i++) {
+      const g = sourceGroups[i];
+      const { data: newGroupRows, error: insGErr } = await supabase
+        .from("menu_modifiers")
+        .insert({
+          menu_item_id: modifierItemId,
+          group_name: g.group_name,
+          required: g.required,
+          max_selections: g.max_selections,
+          sort_order: baseSort + i + 1,
+        })
+        .select();
+      if (insGErr || !newGroupRows || newGroupRows.length === 0) {
+        flash("Copy failed mid-way");
+        await loadModifiers(modifierItemId);
+        setShowCopyPicker(false);
+        return;
+      }
+      const newGroup = newGroupRows[0];
+
+      const optionsForGroup = (sourceOptions || []).filter((o) => o.modifier_id === g.id);
+      if (optionsForGroup.length > 0) {
+        const newOptions = optionsForGroup.map((o) => ({
+          modifier_id: newGroup.id,
+          option_name: o.option_name,
+          price_cents: o.price_cents,
+          is_default: o.is_default,
+          sort_order: o.sort_order,
+        }));
+        const { error: insOErr } = await supabase
+          .from("modifier_options")
+          .insert(newOptions);
+        if (insOErr) {
+          flash("Copied groups but options failed");
+          await loadModifiers(modifierItemId);
+          setShowCopyPicker(false);
+          return;
+        }
+      }
+    }
+
+    await loadModifiers(modifierItemId);
+    setShowCopyPicker(false);
+    flash(`Copied ${sourceGroups.length} group${sourceGroups.length === 1 ? "" : "s"}`);
+  };
+
+  // Load copy candidates (other items in venue that have modifiers) when picker opens
+  useEffect(() => {
+    if (!showCopyPicker || !venue?.id) return;
+    async function loadCandidates() {
+      const { data } = await supabase
+        .from("menu_modifiers")
+        .select("menu_item_id");
+      if (!data) { setCopyCandidates([]); return; }
+      const itemIdsWithMods = new Set(data.map((d) => d.menu_item_id));
+      const candidates = menu.filter(
+        (m) => itemIdsWithMods.has(m.id) && m.id !== modifierItemId
+      );
+      setCopyCandidates(candidates);
+    }
+    loadCandidates();
+  }, [showCopyPicker, modifierItemId, venue?.id, menu]);
+
   const ordered = orderedCategories();
   const modifierItem = menu.find((m) => m.id === modifierItemId);
 
@@ -311,6 +400,61 @@ function MasterMenuBuilder({ venue, setManagedVenue, onBack }) {
         </div>
         <h3 style={MS.manageTitle}>Modifiers — {modifierItem.item_name}</h3>
         <p style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>Add customization options customers can choose when ordering this item.</p>
+
+        {/* Copy from another item — time saver for similar items */}
+        {!showCopyPicker ? (
+          <button
+            onClick={() => setShowCopyPicker(true)}
+            style={{
+              padding: "8px 14px", borderRadius: 6, border: "1px dashed #1E4D8C66",
+              background: "#1E4D8C11", color: "#1E4D8C",
+              fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
+              letterSpacing: 2, cursor: "pointer", width: "100%", marginBottom: 14,
+            }}
+          >
+            📋 COPY MODIFIERS FROM ANOTHER ITEM
+          </button>
+        ) : (
+          <div style={{
+            padding: 12, background: "#0a0a0a", border: "1px solid #1E4D8C44",
+            borderRadius: 8, marginBottom: 14, display: "flex", flexDirection: "column", gap: 8,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 11, letterSpacing: 2, color: "#1E4D8C" }}>
+                COPY FROM WHICH ITEM?
+              </span>
+              <button onClick={() => setShowCopyPicker(false)} style={MS.dimBtn}>CANCEL</button>
+            </div>
+            {copyCandidates.length === 0 ? (
+              <p style={{ fontSize: 11, color: "#888", margin: "4px 0" }}>
+                No other items have modifiers yet. Create some first, then you can copy them.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {copyCandidates.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => copyModifiersFromItem(c.id)}
+                    style={{
+                      padding: "8px 10px", background: "#141414", border: "1px solid #222",
+                      borderRadius: 6, textAlign: "left", cursor: "pointer",
+                      fontFamily: "'Inter', sans-serif", fontSize: 12, color: "#f5f5f5",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}
+                  >
+                    <span>{c.item_name}</span>
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666" }}>
+                      {c.category}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p style={{ fontSize: 10, color: "#666", margin: "4px 0 0", fontStyle: "italic" }}>
+              Adds groups to current item without replacing existing ones.
+            </p>
+          </div>
+        )}
 
         {modGroups.map((group) => (
           <div key={group.id} style={{ marginBottom: 20, padding: 14, background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>

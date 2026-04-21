@@ -152,10 +152,44 @@ export default function OnboardingView({ BRAND }) {
 // ============================================
 // STEP 1: ACCOUNT
 // ============================================
+// Two modes:
+//   - "form": email/password form for signup or login
+//   - "verifying": waiting for email confirmation, polls every 3s
 function AccountStep({ onComplete, error, setError }) {
+  const [mode, setMode] = useState("form"); // form | verifying
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Poll for email verification when in "verifying" mode.
+  // Every 3 seconds, check whether the user has confirmed.
+  // If they have, auto-advance to the next step.
+  useEffect(() => {
+    if (mode !== "verifying") return;
+
+    const pollInterval = setInterval(async () => {
+      // Force a session refresh — otherwise Supabase may return stale unconfirmed state
+      const { data: { session }, error: refreshError } = await supabase.auth.refreshSession();
+      if (refreshError) return; // Keep polling silently
+
+      const confirmedUser = session?.user;
+      // email_confirmed_at is populated the moment Supabase processes the link
+      if (confirmedUser?.email_confirmed_at) {
+        clearInterval(pollInterval);
+        onComplete(confirmedUser);
+      }
+    }, 3000);
+
+    return () => clearInterval(pollInterval);
+  }, [mode, onComplete]);
+
+  // Resend cooldown tick-down (so users can't spam the resend button)
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
   const handleSignup = async () => {
     if (!email || !password) { setError("Email and password required"); return; }
@@ -172,24 +206,115 @@ function AccountStep({ onComplete, error, setError }) {
       return;
     }
 
-    // If email confirmation is disabled, user is immediately available
-    if (data.user) {
+    // Check whether email confirmation is required.
+    // If the user is already confirmed (e.g., setting is off), proceed straight away.
+    if (data.user?.email_confirmed_at) {
       onComplete(data.user);
-    } else {
-      setError("Check your email to confirm your account, then refresh this page.");
+      setLoading(false);
+      return;
     }
+
+    // Otherwise, switch to verifying mode and start polling.
+    setMode("verifying");
+    setResendCooldown(30); // Can't resend for first 30 seconds
     setLoading(false);
   };
 
   const handleLogin = async () => {
+    if (!email || !password) { setError("Email and password required"); return; }
     setLoading(true);
     setError(null);
     const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-    if (authError) { setError(authError.message); setLoading(false); return; }
+    if (authError) {
+      // Common case: user is trying to log in but hasn't confirmed email yet
+      if (authError.message?.toLowerCase().includes("email not confirmed")) {
+        setMode("verifying");
+        setResendCooldown(30);
+        setLoading(false);
+        return;
+      }
+      setError(authError.message);
+      setLoading(false);
+      return;
+    }
     if (data.user) onComplete(data.user);
     setLoading(false);
   };
 
+  const handleResend = async () => {
+    if (resendCooldown > 0) return;
+    setError(null);
+    const { error: resendError } = await supabase.auth.resend({
+      type: "signup",
+      email: email,
+    });
+    if (resendError) {
+      setError("Could not resend. " + resendError.message);
+      return;
+    }
+    setResendCooldown(30);
+  };
+
+  const handleChangeEmail = () => {
+    setMode("form");
+    setError(null);
+  };
+
+  // --- Verifying view ---
+  if (mode === "verifying") {
+    return (
+      <div style={S.stepCard}>
+        <div style={{ fontSize: 48, textAlign: "center" }}>📧</div>
+        <h2 style={S.stepTitle}>Check Your Email</h2>
+        <p style={S.stepDesc}>
+          We sent a confirmation link to <strong style={{ color: "#d4a843" }}>{email}</strong>.
+          Click it to verify your account — this page will advance automatically.
+        </p>
+
+        <div style={{
+          padding: 12,
+          background: "#1E4D8C15",
+          border: "1px solid #1E4D8C33",
+          borderRadius: 10,
+          fontFamily: "'Space Mono', monospace",
+          fontSize: 11,
+          color: "#1E4D8C",
+          letterSpacing: 1,
+          textAlign: "center",
+        }}>
+          <span style={{ display: "inline-block", marginRight: 6, animation: "pulse 1.5s ease-in-out infinite" }}>●</span>
+          WAITING FOR CONFIRMATION...
+        </div>
+
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+          }
+        `}</style>
+
+        {error && <p style={S.error}>{error}</p>}
+
+        <button
+          onClick={handleResend}
+          disabled={resendCooldown > 0}
+          style={{ ...S.secondaryBtn, opacity: resendCooldown > 0 ? 0.5 : 1 }}
+        >
+          {resendCooldown > 0 ? `RESEND EMAIL IN ${resendCooldown}s` : "RESEND CONFIRMATION EMAIL"}
+        </button>
+
+        <button onClick={handleChangeEmail} style={S.linkBtn}>
+          Wrong email? Start over
+        </button>
+
+        <p style={{ ...S.altAuth, marginTop: 4, fontSize: 11 }}>
+          Didn't get the email? Check spam, or click resend above.
+        </p>
+      </div>
+    );
+  }
+
+  // --- Form view ---
   return (
     <div style={S.stepCard}>
       <h2 style={S.stepTitle}>Create Your Account</h2>

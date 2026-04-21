@@ -246,6 +246,15 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   const [newCategory, setNewCategory] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
 
+  // Modifier editor state — when modifierItemId is set, we show the mod editor
+  // instead of the normal menu list
+  const [modifierItemId, setModifierItemId] = useState(null);
+  const [modGroups, setModGroups] = useState([]);
+  const [editingGroup, setEditingGroup] = useState(null);
+  const [editingOption, setEditingOption] = useState(null);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [showCopyPicker, setShowCopyPicker] = useState(false);
+
   // ============================
   // CATEGORY ORDERING
   // ============================
@@ -402,8 +411,424 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     if (!error) { await onSave(); showSaved(item.active ? "Item hidden" : "Item visible"); }
   };
 
-  const ordered = orderedCategories();
+  // ============================
+  // MODIFIER MANAGEMENT
+  // ============================
+  async function loadModifiers(menuItemId) {
+    const { data: groups } = await supabase
+      .from("menu_modifiers")
+      .select("*")
+      .eq("menu_item_id", menuItemId)
+      .order("sort_order");
+    if (!groups || groups.length === 0) { setModGroups([]); return; }
+    const groupIds = groups.map((g) => g.id);
+    const { data: options } = await supabase
+      .from("modifier_options")
+      .select("*")
+      .in("modifier_id", groupIds)
+      .order("sort_order");
+    setModGroups(groups.map((g) => ({
+      ...g,
+      options: (options || []).filter((o) => o.modifier_id === g.id),
+    })));
+  }
 
+  const openModifiers = async (itemId) => {
+    setModifierItemId(itemId);
+    await loadModifiers(itemId);
+  };
+
+  const closeModifiers = () => {
+    setModifierItemId(null);
+    setModGroups([]);
+    setEditingGroup(null);
+    setEditingOption(null);
+    setNewGroupName("");
+    setShowCopyPicker(false);
+  };
+
+  const addModGroup = async () => {
+    if (!newGroupName.trim()) return;
+    const { error } = await supabase.from("menu_modifiers").insert({
+      menu_item_id: modifierItemId,
+      group_name: newGroupName.trim(),
+      required: false,
+      max_selections: 1,
+      sort_order: modGroups.length + 1,
+    });
+    if (error) { showSaved("Add failed"); return; }
+    setNewGroupName("");
+    await loadModifiers(modifierItemId);
+    showSaved("Group added");
+  };
+
+  const updateModGroup = async (group) => {
+    const { error } = await supabase
+      .from("menu_modifiers")
+      .update({
+        group_name: group.group_name,
+        required: group.required,
+        max_selections: group.max_selections,
+      })
+      .eq("id", group.id);
+    if (error) { showSaved("Update failed"); return; }
+    await loadModifiers(modifierItemId);
+    setEditingGroup(null);
+    showSaved("Group updated");
+  };
+
+  const deleteModGroup = async (groupId) => {
+    if (!confirm("Delete this modifier group and all its options?")) return;
+    await supabase.from("modifier_options").delete().eq("modifier_id", groupId);
+    const { error } = await supabase.from("menu_modifiers").delete().eq("id", groupId);
+    if (error) { showSaved("Delete failed"); return; }
+    await loadModifiers(modifierItemId);
+    showSaved("Group removed");
+  };
+
+  const addOption = async (groupId) => {
+    const { error } = await supabase.from("modifier_options").insert({
+      modifier_id: groupId,
+      option_name: "New Option",
+      price_cents: 0,
+      is_default: false,
+      sort_order: 99,
+    });
+    if (error) { showSaved("Add failed"); return; }
+    await loadModifiers(modifierItemId);
+  };
+
+  const updateOption = async (opt) => {
+    const { error } = await supabase
+      .from("modifier_options")
+      .update({
+        option_name: opt.option_name,
+        price_cents: opt.price_cents,
+        is_default: opt.is_default,
+        sort_order: opt.sort_order,
+      })
+      .eq("id", opt.id);
+    if (error) { showSaved("Update failed"); return; }
+    await loadModifiers(modifierItemId);
+    setEditingOption(null);
+  };
+
+  const deleteOption = async (optId) => {
+    const { error } = await supabase.from("modifier_options").delete().eq("id", optId);
+    if (error) { showSaved("Delete failed"); return; }
+    await loadModifiers(modifierItemId);
+  };
+
+  // Copy all modifier groups + options from a source item to the current item
+  // Using "add" semantics: existing groups are preserved, copied groups are appended
+  const copyModifiersFromItem = async (sourceItemId) => {
+    // 1. Fetch all groups from source
+    const { data: sourceGroups, error: gErr } = await supabase
+      .from("menu_modifiers")
+      .select("*")
+      .eq("menu_item_id", sourceItemId)
+      .order("sort_order");
+    if (gErr || !sourceGroups || sourceGroups.length === 0) {
+      showSaved("Source has no modifiers");
+      setShowCopyPicker(false);
+      return;
+    }
+
+    // 2. Fetch all options for those groups
+    const sourceGroupIds = sourceGroups.map((g) => g.id);
+    const { data: sourceOptions, error: oErr } = await supabase
+      .from("modifier_options")
+      .select("*")
+      .in("modifier_id", sourceGroupIds)
+      .order("sort_order");
+    if (oErr) { showSaved("Copy failed"); return; }
+
+    // 3. Determine starting sort_order to append after any existing groups
+    const baseSort = modGroups.length;
+
+    // 4. Insert duplicated groups, one at a time so we can map old IDs → new IDs
+    for (let i = 0; i < sourceGroups.length; i++) {
+      const g = sourceGroups[i];
+      const { data: newGroupRows, error: insGErr } = await supabase
+        .from("menu_modifiers")
+        .insert({
+          menu_item_id: modifierItemId,
+          group_name: g.group_name,
+          required: g.required,
+          max_selections: g.max_selections,
+          sort_order: baseSort + i + 1,
+        })
+        .select();
+      if (insGErr || !newGroupRows || newGroupRows.length === 0) {
+        showSaved("Copy failed mid-way");
+        await loadModifiers(modifierItemId);
+        setShowCopyPicker(false);
+        return;
+      }
+      const newGroup = newGroupRows[0];
+
+      // 5. For each option of that source group, insert a copy pointing at the new group
+      const optionsForGroup = (sourceOptions || []).filter((o) => o.modifier_id === g.id);
+      if (optionsForGroup.length > 0) {
+        const newOptions = optionsForGroup.map((o) => ({
+          modifier_id: newGroup.id,
+          option_name: o.option_name,
+          price_cents: o.price_cents,
+          is_default: o.is_default,
+          sort_order: o.sort_order,
+        }));
+        const { error: insOErr } = await supabase
+          .from("modifier_options")
+          .insert(newOptions);
+        if (insOErr) {
+          showSaved("Copied groups but options failed");
+          await loadModifiers(modifierItemId);
+          setShowCopyPicker(false);
+          return;
+        }
+      }
+    }
+
+    await loadModifiers(modifierItemId);
+    setShowCopyPicker(false);
+    showSaved(`Copied ${sourceGroups.length} modifier group${sourceGroups.length === 1 ? "" : "s"}`);
+  };
+
+  const ordered = orderedCategories();
+  const modifierItem = menu.find((m) => m.id === modifierItemId);
+
+  // Items that have modifier groups (useful sources for the copy picker)
+  // Note: we derive this lazily when the copy picker opens, since it needs a DB roundtrip
+  const [copyCandidates, setCopyCandidates] = useState([]);
+  useEffect(() => {
+    if (!showCopyPicker || !venue?.id) return;
+    async function loadCandidates() {
+      const { data } = await supabase
+        .from("menu_modifiers")
+        .select("menu_item_id");
+      if (!data) { setCopyCandidates([]); return; }
+      const itemIdsWithMods = new Set(data.map((d) => d.menu_item_id));
+      // Exclude the current item (copying from yourself is useless)
+      const candidates = menu.filter(
+        (m) => itemIdsWithMods.has(m.id) && m.id !== modifierItemId
+      );
+      setCopyCandidates(candidates);
+    }
+    loadCandidates();
+  }, [showCopyPicker, modifierItemId, venue?.id, menu]);
+
+  // ---- MODIFIER EDITOR VIEW ----
+  // When modifierItemId is set, show the modifier editor instead of the menu list
+  if (modifierItemId && modifierItem) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <button onClick={closeModifiers} style={S.smallBtnDim}>← BACK TO MENU</button>
+        </div>
+        <h3 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, letterSpacing: 2, marginBottom: 4 }}>
+          Modifiers — {modifierItem.item_name}
+        </h3>
+        <p style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
+          Customization options patrons can pick when ordering this item (e.g., Size, Mixer, Ice).
+        </p>
+
+        {/* Copy from another item — huge time saver */}
+        {!showCopyPicker ? (
+          <button
+            onClick={() => setShowCopyPicker(true)}
+            style={{
+              padding: "10px 16px", borderRadius: 8, border: "1px dashed #1E4D8C66",
+              background: "#1E4D8C11", color: "#1E4D8C",
+              fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
+              letterSpacing: 2, cursor: "pointer", width: "100%", marginBottom: 16,
+            }}
+          >
+            📋 COPY MODIFIERS FROM ANOTHER ITEM
+          </button>
+        ) : (
+          <div style={{
+            padding: 14, background: "#0a0a0a", border: "1px solid #1E4D8C44",
+            borderRadius: 10, marginBottom: 16, display: "flex", flexDirection: "column", gap: 8,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 2, color: "#1E4D8C" }}>
+                COPY FROM WHICH ITEM?
+              </span>
+              <button onClick={() => setShowCopyPicker(false)} style={S.smallBtnDim}>CANCEL</button>
+            </div>
+            {copyCandidates.length === 0 ? (
+              <p style={{ fontSize: 12, color: "#888", margin: "4px 0" }}>
+                No other items have modifiers yet. Create some first, then you can copy them.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                {copyCandidates.map((c) => (
+                  <button
+                    key={c.id}
+                    onClick={() => copyModifiersFromItem(c.id)}
+                    style={{
+                      padding: "10px 12px", background: "#141414", border: "1px solid #222",
+                      borderRadius: 8, textAlign: "left", cursor: "pointer",
+                      fontFamily: "'Inter', sans-serif", fontSize: 13, color: "#f5f5f5",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}
+                  >
+                    <span>{c.item_name}</span>
+                    <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666" }}>
+                      {c.category}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            <p style={{ fontSize: 11, color: "#666", margin: "4px 0 0", fontStyle: "italic" }}>
+              This adds the modifier groups to your current item without replacing existing ones.
+            </p>
+          </div>
+        )}
+
+        {/* Existing modifier groups */}
+        {modGroups.map((group) => (
+          <div key={group.id} style={{
+            marginBottom: 20, padding: 14, background: "#0a0a0a",
+            borderRadius: 10, border: "1px solid #1a1a1a",
+          }}>
+            {/* Group header */}
+            {editingGroup?.id === group.id ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+                <input
+                  value={editingGroup.group_name}
+                  onChange={(e) => setEditingGroup({ ...editingGroup, group_name: e.target.value })}
+                  style={S.input}
+                  placeholder="Group name (e.g., Size, Ice, Mixer)"
+                />
+                <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={editingGroup.required}
+                      onChange={(e) => setEditingGroup({ ...editingGroup, required: e.target.checked })}
+                    />
+                    Required
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#aaa" }}>
+                    Max picks:
+                    <input
+                      type="number" min="1" max="10"
+                      value={editingGroup.max_selections}
+                      onChange={(e) => setEditingGroup({ ...editingGroup, max_selections: parseInt(e.target.value || 1) })}
+                      style={{ ...S.input, width: 60, padding: "6px 8px" }}
+                    />
+                  </label>
+                </div>
+                <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                  <button onClick={() => setEditingGroup(null)} style={S.smallBtnDim}>CANCEL</button>
+                  <button onClick={() => updateModGroup(editingGroup)} style={S.smallBtn}>SAVE</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div>
+                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: "#d4a843" }}>
+                    {group.group_name}
+                  </span>
+                  <span style={{ fontSize: 10, color: "#666", marginLeft: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>
+                    {group.required ? "REQUIRED" : "OPTIONAL"} · {group.max_selections > 1 ? `Pick up to ${group.max_selections}` : "Pick 1"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <button onClick={() => setEditingGroup({ ...group })} style={S.iconBtn} title="Edit group">✏️</button>
+                  <button onClick={() => deleteModGroup(group.id)} style={S.iconBtn} title="Delete group">🗑</button>
+                </div>
+              </div>
+            )}
+
+            {/* Options list */}
+            {group.options.map((opt) =>
+              editingOption?.id === opt.id ? (
+                <div key={opt.id} style={{ display: "flex", gap: 6, marginBottom: 4, alignItems: "center", flexWrap: "wrap" }}>
+                  <input
+                    value={editingOption.option_name}
+                    onChange={(e) => setEditingOption({ ...editingOption, option_name: e.target.value })}
+                    style={{ ...S.input, flex: 1, minWidth: 120 }}
+                    placeholder="Option name"
+                  />
+                  <input
+                    type="number" step="0.01"
+                    value={(editingOption.price_cents / 100).toFixed(2)}
+                    onChange={(e) => setEditingOption({ ...editingOption, price_cents: Math.round(parseFloat(e.target.value || 0) * 100) })}
+                    style={{ ...S.input, width: 80 }}
+                    placeholder="+$"
+                  />
+                  <label style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, color: "#888", whiteSpace: "nowrap" }}>
+                    <input
+                      type="checkbox"
+                      checked={editingOption.is_default}
+                      onChange={(e) => setEditingOption({ ...editingOption, is_default: e.target.checked })}
+                    />
+                    Default
+                  </label>
+                  <button onClick={() => updateOption(editingOption)} style={{ ...S.smallBtn, padding: "6px 12px", fontSize: 11 }}>OK</button>
+                  <button onClick={() => setEditingOption(null)} style={{ ...S.smallBtnDim, padding: "6px 12px", fontSize: 11 }}>×</button>
+                </div>
+              ) : (
+                <div key={opt.id} style={{
+                  display: "flex", alignItems: "center", gap: 8, padding: "8px 10px",
+                  marginBottom: 4, borderRadius: 6, background: "#141414",
+                }}>
+                  <span style={{ flex: 1, fontSize: 13, color: "#ccc" }}>{opt.option_name}</span>
+                  {opt.price_cents !== 0 && (
+                    <span style={{
+                      fontSize: 11,
+                      color: opt.price_cents > 0 ? "#d4a843" : "#2ecc71",
+                      fontFamily: "'Space Mono', monospace",
+                    }}>
+                      {opt.price_cents > 0 ? "+" : ""}${(opt.price_cents / 100).toFixed(2)}
+                    </span>
+                  )}
+                  {opt.is_default && (
+                    <span style={{
+                      fontSize: 8, color: "#1E4D8C",
+                      fontFamily: "'Space Mono', monospace", letterSpacing: 1,
+                      padding: "1px 6px", background: "#1E4D8C22", borderRadius: 4,
+                    }}>
+                      DEFAULT
+                    </span>
+                  )}
+                  <button onClick={() => setEditingOption({ ...opt })} style={S.iconBtn}>✏️</button>
+                  <button onClick={() => deleteOption(opt.id)} style={S.iconBtn}>🗑</button>
+                </div>
+              )
+            )}
+            <button
+              onClick={() => addOption(group.id)}
+              style={{
+                marginTop: 6, padding: "6px 12px", borderRadius: 6,
+                border: "1px dashed #333", background: "transparent", color: "#666",
+                fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer",
+              }}
+            >
+              + Add Option
+            </button>
+          </div>
+        ))}
+
+        {/* Add new modifier group */}
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <input
+            placeholder="New group (e.g., Size, Mixer, Temperature)"
+            value={newGroupName}
+            onChange={(e) => setNewGroupName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addModGroup()}
+            style={{ ...S.input, flex: 1 }}
+          />
+          <button onClick={addModGroup} style={S.smallBtn}>ADD GROUP</button>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- NORMAL MENU LIST VIEW ----
   return (
     <div>
       {/* NEW CATEGORY BUTTON — MOVED TO TOP */}
@@ -468,6 +893,18 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                 </div>
                 <div style={S.menuRowRight}>
                   <span style={S.menuItemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
+                  <button
+                    onClick={() => openModifiers(item.id)}
+                    style={{
+                      background: "transparent", border: "1px solid #d4a84333",
+                      borderRadius: 4, padding: "3px 8px",
+                      color: "#d4a843", fontFamily: "'Space Mono', monospace",
+                      fontSize: 9, letterSpacing: 1, cursor: "pointer",
+                    }}
+                    title="Edit modifiers for this item"
+                  >
+                    MODS
+                  </button>
                   <button onClick={() => handleToggleActive(item)} style={S.iconBtn} title={item.active ? "Hide" : "Show"}>
                     {item.active ? "👁" : "🚫"}
                   </button>

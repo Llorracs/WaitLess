@@ -41,11 +41,17 @@ exports.handler = async (event) => {
     return redirect(venueId, 'error=missing_code_or_venue');
   }
 
+  // Build the exact same redirect_uri that AdminView used when initiating the
+  // OAuth flow. Square requires this to match byte-for-byte during the
+  // token exchange, otherwise it returns MISSING_REQUIRED_PARAMETER.
+  const baseUrl = process.env.URL || 'https://waitlss.netlify.app';
+  const redirectUri = `${baseUrl}/.netlify/functions/square-oauth-callback`;
+
   try {
     // Exchange authorization code for access token
     const tokenResponse = await fetch('https://connect.squareup.com/oauth2/token', {
       method: 'POST',
-      headers: { 
+      headers: {
         'Content-Type': 'application/json',
         'Square-Version': '2024-01-18',
       },
@@ -54,6 +60,7 @@ exports.handler = async (event) => {
         client_secret: process.env.SQUARE_APP_SECRET,
         code,
         grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
       }),
     });
 
@@ -81,7 +88,7 @@ exports.handler = async (event) => {
 
     const locationsData = await locationsResponse.json();
     const locations = locationsData.locations || [];
-    
+
     // Use the first active location (or the main one)
     const primaryLocation = locations.find(l => l.status === 'ACTIVE') || locations[0];
     const locationId = primaryLocation?.id;
@@ -120,7 +127,7 @@ function redirect(venueId, queryParam) {
   // Look up venue slug from ID so we can redirect to the right admin page
   // For now, redirect to root admin — the frontend will handle it
   const baseUrl = process.env.URL || 'https://waitlss.netlify.app';
-  
+
   if (venueId) {
     // We need the slug but only have the ID — redirect with venue ID as param
     return {

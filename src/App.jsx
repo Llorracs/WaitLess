@@ -761,6 +761,11 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
 
     setView("processing");
 
+    // Declared at function scope so squarePaymentId/squareOrderId can read it
+    // below the try/else block. Previous bug: `data` was block-scoped inside
+    // the else branch, causing a ReferenceError on real-payment checkout.
+    let paymentResult = null;
+
     try {
       if (isDemoMode) {
         // Demo flow — simulate payment steps, skip Square
@@ -791,8 +796,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
           }),
         });
 
-        const data = await response.json();
-        if (!data.success) throw new Error(data.error || "Payment failed");
+        paymentResult = await response.json();
+        if (!paymentResult.success) throw new Error(paymentResult.error || "Payment failed");
       }
 
       setProcessingStep("Confirming order...");
@@ -815,8 +820,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         subtotalCents,
         feeCents: feeCents + tipCents,
         totalCents,
-        squarePaymentId: isDemoMode ? "DEMO" : data.paymentId,
-        squareOrderId: isDemoMode ? "DEMO" : data.orderId,
+        squarePaymentId: isDemoMode ? "DEMO" : paymentResult.paymentId,
+        squareOrderId: isDemoMode ? "DEMO" : paymentResult.orderId,
         patronPhone: patronPhone || null,
         specialInstructions: specialInstructions || null,
       });

@@ -901,7 +901,20 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         {totalInCart > 0 && (
-                          <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{totalInCart}</span>
+                          <>
+                            <button
+                              onClick={() => {
+                                // Remove the first cart entry for this item (simplest behavior).
+                                // If item has modifier variants, removes the first variant found.
+                                const firstEntry = cart.find((c) => c.id === item.id);
+                                if (firstEntry) removeFromCart(firstEntry.cartKey);
+                              }}
+                              style={{ width: 32, height: 32, borderRadius: "50%", border: `1px solid ${BRAND.primary}`, background: "transparent", color: BRAND.primary, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}
+                            >
+                              −
+                            </button>
+                            <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, width: 20, textAlign: "center", color: BRAND.primary }}>{totalInCart}</span>
+                          </>
                         )}
                         <button onClick={() => handleAddItem(item)} style={{ width: 32, height: 32, borderRadius: "50%", border: totalInCart > 0 ? `1px solid ${BRAND.primary}` : `1px solid ${BRAND.dimText}`, background: totalInCart > 0 ? BRAND.primary : "transparent", color: totalInCart > 0 ? BRAND.white : BRAND.gray, fontSize: 18, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.2s ease" }}>+</button>
                       </div>

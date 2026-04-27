@@ -1177,9 +1177,49 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                 </div>
               </div>
 
-              {/* Notification preferences */}
+             {/* Notification preferences */}
               <div style={{ marginBottom: 16 }}>
                 <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 10 }}>Get notified when ready</div>
+
+                {/* Push notification opt-in — must be triggered by direct user tap
+                    or iOS Safari silently no-ops the permission request */}
+                {"Notification" in window && Notification.permission === "default" && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const result = await Notification.requestPermission();
+                        if (result === "granted") {
+                          // Show a confirmation toast/notification immediately so user knows it worked
+                          new Notification(`${venue.name}`, {
+                            body: "You'll be notified when your order is ready.",
+                            icon: venue.logo_url || undefined,
+                          });
+                        }
+                      } catch (_err) {
+                        // Permission request failed silently — non-fatal
+                      }
+                    }}
+                    style={{
+                      width: "100%", padding: "12px", marginBottom: 8, borderRadius: 10,
+                      background: "transparent", border: `1px dashed ${BRAND.accent}66`,
+                      color: BRAND.accent, fontFamily: "'Oswald', sans-serif",
+                      fontSize: 13, fontWeight: 600, letterSpacing: 2, cursor: "pointer",
+                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    }}
+                  >
+                    🔔 ENABLE NOTIFICATIONS
+                  </button>
+                )}
+                {"Notification" in window && Notification.permission === "granted" && (
+                  <div style={{
+                    padding: "10px 12px", marginBottom: 8, borderRadius: 10,
+                    background: `${BRAND.success}15`, border: `1px solid ${BRAND.success}33`,
+                    fontFamily: "'Space Mono', monospace", fontSize: 11, color: BRAND.success,
+                    letterSpacing: 1, textAlign: "center",
+                  }}>
+                    ✓ NOTIFICATIONS ENABLED
+                  </div>
+                )}
                 <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: BRAND.cardBg, borderRadius: 10, border: "1px solid #222" }}>
                   <span style={{ fontSize: 16 }}>📱</span>
                   <input

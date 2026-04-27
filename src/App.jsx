@@ -826,11 +826,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         specialInstructions: specialInstructions || null,
       });
 
-      // Request push notification permission after first order
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission();
-      }
-
       setActiveOrders((prev) => [...prev, newOrder]);
       setActiveOrderIndex((prev) => prev === 0 && activeOrders.length === 0 ? 0 : activeOrders.length);
       setCart([]);

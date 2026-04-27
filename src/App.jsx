@@ -533,8 +533,73 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
     return "menu";
   });
   const [processingStep, setProcessingStep] = useState("");
-  const [activeOrders, setActiveOrders] = useState(demoOrders || []); // Restore from demo state if available
+ const [activeOrders, setActiveOrders] = useState(demoOrders || []); // Restore from demo state if available
   const [activeOrderIndex, setActiveOrderIndex] = useState(0); // Which badge is showing
+
+  // Persist active order IDs to localStorage so patron can leave/return to the app
+  // without losing their confirmation screen. Keys are scoped per venue.
+  // Auto-expires entries older than 30min (by then status would be picked_up or expired).
+  const ACTIVE_ORDERS_KEY = `waitless_active_orders_${venue.id}`;
+  const ACTIVE_ORDERS_TTL = 30 * 60 * 1000; // 30 minutes
+
+  // On mount: restore active orders from localStorage by re-fetching from Supabase
+  useEffect(() => {
+    if (demoOrders && demoOrders.length > 0) return; // Demo flow handles its own restore
+    try {
+      const raw = localStorage.getItem(ACTIVE_ORDERS_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      // Filter out stale entries
+      const fresh = (parsed || []).filter((entry) => {
+        return entry.id && (Date.now() - (entry.savedAt || 0) < ACTIVE_ORDERS_TTL);
+      });
+      if (fresh.length === 0) {
+        localStorage.removeItem(ACTIVE_ORDERS_KEY);
+        return;
+      }
+      const ids = fresh.map((e) => e.id);
+      // Re-fetch from Supabase to get current statuses
+      async function restoreOrders() {
+        const { data } = await supabase
+          .from("bar_orders")
+          .select("*")
+          .in("id", ids);
+        if (data && data.length > 0) {
+          // Filter out picked_up and expired - patron doesn't need to see those
+          const active = data.filter((o) => o.status !== "picked_up" && o.status !== "expired");
+          if (active.length > 0) {
+            setActiveOrders(active);
+            setView("confirmation");
+          } else {
+            // All previous orders are done — clean up
+            localStorage.removeItem(ACTIVE_ORDERS_KEY);
+          }
+        }
+      }
+      restoreOrders();
+    } catch (_err) {
+      // Corrupt localStorage entry — clear it
+      try { localStorage.removeItem(ACTIVE_ORDERS_KEY); } catch (_e) {}
+    }
+  }, [venue.id]);
+
+  // Persist active order IDs whenever the list changes
+  useEffect(() => {
+    if (demoOrders) return; // Don't persist demo state
+    try {
+      if (activeOrders.length === 0) {
+        localStorage.removeItem(ACTIVE_ORDERS_KEY);
+        return;
+      }
+      const toSave = activeOrders.map((o) => ({
+        id: o.id,
+        savedAt: Date.now(),
+      }));
+      localStorage.setItem(ACTIVE_ORDERS_KEY, JSON.stringify(toSave));
+    } catch (_err) {
+      // localStorage might be disabled — fail silently
+    }
+  }, [activeOrders, ACTIVE_ORDERS_KEY, demoOrders]);
   const [tipPercent, setTipPercent] = useState(0); // 0, 15, 18, 20, or custom
   const [customTip, setCustomTip] = useState("");
   const [showCustomTip, setShowCustomTip] = useState(false);

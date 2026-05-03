@@ -659,7 +659,9 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
     acc[item.category].push(item);
     return acc;
   }, {});
-  const categories = Object.keys(menuByCategory);
+  const categories = venue?.category_order?.length
+  ? venue.category_order.filter((cat) => menuByCategory[cat])
+  : Object.keys(menuByCategory);
 
   // Current displayed order
   const currentOrder = activeOrders[activeOrderIndex];

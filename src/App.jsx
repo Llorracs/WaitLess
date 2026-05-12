@@ -40,7 +40,7 @@ import AdminView from "./AdminView";
 import OnboardingView from "./OnboardingView";
 import MasterAdmin from "./MasterAdmin";
 import InstallPrompt from "./InstallPrompt";
-import { PrivacyPolicy, TermsOfService } from "./LegalPages";
+import { PrivacyPolicy, TermsOfService, RefundPolicy, VenueTerms } from "./LegalPages";
 
 // ============================================
 // URL PARSING
@@ -59,7 +59,9 @@ function getRouteFromUrl() {
   const isOAuthComplete = parts[0] === "oauth-complete";
   const isPrivacy = parts[0] === "privacy";
   const isTerms = parts[0] === "terms";
-  return { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms };
+  const isRefundPolicy = parts[0] === "refund-policy";
+  const isVenueTerms = parts[0] === "venue-terms";
+  return { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms, isRefundPolicy, isVenueTerms };;
 }
 
 // ============================================
@@ -341,7 +343,7 @@ export default function App() {
   const [ageVerified, setAgeVerifiedState] = useState(false);
   const [demoView, setDemoView] = useState("patron");
   const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
-  const { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms } = getRouteFromUrl();
+  const { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms, isRefundPolicy, isVenueTerms } = getRouteFromUrl();
 
   // Set demo view based on URL on mount
   useEffect(() => {

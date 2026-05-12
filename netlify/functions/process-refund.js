@@ -1,51 +1,31 @@
 /**
  * ============================================
- * WAITLESS — Refund Processing
+ * WAITLESS — Refund Processing (v3 — uses captured per-ticket price)
  * Netlify Serverless Function
  * ============================================
  *
  * Path: netlify/functions/process-refund.js
  *
- * Handles refunds of paid ticket orders, full or per-ticket.
+ * CHANGE FROM v2 (mandatory reason):
+ *   For per-ticket refunds, use tickets.price_paid_cents (captured at
+ *   purchase time) instead of the current ticket_types.price_cents.
  *
- * RULES (enforced here):
- *   1. Caller must be authenticated and a member of the venue's staff with
- *      role 'admin' or 'organizer'. Bartenders cannot issue refunds.
- *   2. Order must be in 'paid' status. Already-refunded orders cannot be
- *      re-refunded; failed orders never had tickets to refund.
- *   3. For FULL refunds: zero tickets in the order may have status='checked_in'.
- *      If anyone has already entered, the refund is blocked outright.
- *   4. For PER-TICKET refunds: only tickets with status='valid' are refundable.
- *      Checked-in tickets are silently excluded with a clear error message.
- *   5. Square keeps their processing fee on refunds — venue eats that cost
- *      under Pattern A pricing. The face value is refunded.
+ *   This means: if the venue raised the price from $25 to $30 after a buyer
+ *   purchased at $25, refunding that buyer's ticket returns $25, not $30.
  *
- * REQUEST BODY (full refund):
- *   {
- *     "orderId": "uuid",
- *     "mode": "full",
- *     "reason": "Customer cancellation" (optional)
- *   }
- *
- * REQUEST BODY (per-ticket refund):
- *   {
- *     "orderId": "uuid",
- *     "mode": "tickets",
- *     "ticketIds": ["uuid1", "uuid2"],
- *     "reason": "Cancelled attending" (optional)
- *   }
- *
- * AUTH:
- *   Requires Authorization: Bearer <supabase_user_jwt> header. The Supabase
- *   anon client on the frontend gets this from the user's active session.
- *   We verify it server-side to confirm the caller is a venue staff member.
+ * RULES (unchanged):
+ *   1. Caller must be venue owner OR staff with role 'admin' or 'organizer'
+ *   2. Order must be in 'paid' status
+ *   3. Full refunds blocked if ANY ticket is checked_in
+ *   4. Per-ticket refunds: only 'valid' tickets are refundable
+ *   5. Square keeps processing fee on refunds (venue eats it)
+ *   6. Reason is MANDATORY (validated via STANDARD_REASONS or "other:<text>")
  * ============================================
  */
 
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
 
-// Service-role client — used for the actual writes after auth check
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -54,9 +34,21 @@ const supabase = createClient(
 const RESEND_API_URL = "https://api.resend.com/emails";
 const DEFAULT_FROM = "Waitless Tickets <tickets@waitless.events>";
 
-// ============================================================================
-// HELPERS
-// ============================================================================
+const STANDARD_REASONS = new Set([
+  "customer_cancellation",
+  "buyer_no_show",
+  "event_cancelled",
+  "duplicate_purchase",
+  "order_error",
+]);
+
+const REASON_LABELS = {
+  customer_cancellation: "Customer requested cancellation",
+  buyer_no_show: "Buyer unable to attend",
+  event_cancelled: "Event cancelled",
+  duplicate_purchase: "Duplicate purchase",
+  order_error: "Order error",
+};
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -91,14 +83,46 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
-/**
- * Verify the caller is staff at this venue with admin or organizer role.
- * Uses an auth-scoped Supabase client so RLS applies to the staff lookup.
- */
+function validateReason(rawReason) {
+  if (typeof rawReason !== "string") {
+    return { ok: false, error: "Refund reason is required" };
+  }
+
+  const trimmed = rawReason.trim();
+  if (trimmed.length < 3) {
+    return { ok: false, error: "Refund reason must be at least 3 characters" };
+  }
+
+  if (STANDARD_REASONS.has(trimmed)) {
+    return {
+      ok: true,
+      normalizedReason: trimmed,
+      displayLabel: REASON_LABELS[trimmed],
+    };
+  }
+
+  if (trimmed.startsWith("other:")) {
+    const detail = trimmed.slice(6).trim();
+    if (detail.length < 3) {
+      return { ok: false, error: "Please specify a reason ('Other' requires detail)" };
+    }
+    return {
+      ok: true,
+      normalizedReason: `other:${detail}`,
+      displayLabel: `Other — ${detail}`,
+    };
+  }
+
+  return {
+    ok: true,
+    normalizedReason: trimmed,
+    displayLabel: trimmed,
+  };
+}
+
 async function authorizeStaff(authToken, venueId) {
   if (!authToken) return { ok: false, reason: "Missing auth token" };
 
-  // Make a fresh client scoped to the caller's JWT so auth.uid() resolves
   const callerClient = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY,
@@ -108,12 +132,9 @@ async function authorizeStaff(authToken, venueId) {
   const { data: user, error: userErr } = await callerClient.auth.getUser();
   if (userErr || !user?.user) return { ok: false, reason: "Invalid auth token" };
 
-  // Check if this user is a venue owner OR a staff member with the right role
   const userId = user.user.id;
   const userEmail = user.user.email;
 
-  // Owner check (uses service client — bypasses RLS, which is fine here since
-  // we've already established the caller's identity via JWT)
   const { data: venue } = await supabase
     .from("venues")
     .select("owner_id")
@@ -124,7 +145,6 @@ async function authorizeStaff(authToken, venueId) {
     return { ok: true, userId, role: "owner" };
   }
 
-  // Staff check
   const { data: staffRow } = await supabase
     .from("staff")
     .select("role, is_active")
@@ -141,10 +161,7 @@ async function authorizeStaff(authToken, venueId) {
   return { ok: true, userId, role: staffRow.role };
 }
 
-/**
- * Call Square's refund API. Returns the refund object on success, throws on error.
- */
-async function squareRefundPayment(venue, paymentId, amountCents, currency, reason) {
+async function squareRefundPayment(venue, paymentId, amountCents, currency, reasonText) {
   const baseUrl = venue.square_environment === "production"
     ? "https://connect.squareup.com"
     : "https://connect.squareupsandbox.com";
@@ -161,11 +178,8 @@ async function squareRefundPayment(venue, paymentId, amountCents, currency, reas
     body: JSON.stringify({
       idempotency_key: idempotencyKey,
       payment_id: paymentId,
-      amount_money: {
-        amount: amountCents,
-        currency: currency || "USD",
-      },
-      reason: reason || "Customer refund",
+      amount_money: { amount: amountCents, currency: currency || "USD" },
+      reason: reasonText.slice(0, 192),
     }),
   });
 
@@ -178,9 +192,6 @@ async function squareRefundPayment(venue, paymentId, amountCents, currency, reas
   return data.refund;
 }
 
-/**
- * Send the refund confirmation email to the buyer.
- */
 async function sendRefundEmail({ venue, eventRow, order, refundedTickets, refundAmountCents, mode }) {
   const venuePrimary = venue.brand_colors?.primary || "#e91e8c";
   const venueAccent = venue.brand_colors?.accent || "#d4a843";
@@ -225,7 +236,6 @@ async function sendRefundEmail({ venue, eventRow, order, refundedTickets, refund
                   ? `Your full order for <strong>${escapeHtml(eventRow?.name || "this event")}</strong> has been refunded.`
                   : `${refundedTickets.length} ticket${refundedTickets.length === 1 ? "" : "s"} from your order for <strong>${escapeHtml(eventRow?.name || "this event")}</strong> ${refundedTickets.length === 1 ? "has" : "have"} been refunded.`}
               </p>
-
               ${eventDate ? `
               <div style="background: #fafafa; border-radius: 12px; padding: 16px 20px; margin-bottom: 20px;">
                 <div style="font-family: 'Oswald', Helvetica, Arial, sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 2px; color: ${venuePrimary}; text-transform: uppercase; margin-bottom: 4px;">Event</div>
@@ -233,23 +243,20 @@ async function sendRefundEmail({ venue, eventRow, order, refundedTickets, refund
                 <div style="font-size: 13px; color: #888; margin-top: 2px;">${escapeHtml(eventDate)}</div>
               </div>
               ` : ""}
-
               ${refundedList ? `
               <div style="margin-bottom: 20px;">
                 <div style="font-family: 'Oswald', Helvetica, Arial, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 2px; color: #666; text-transform: uppercase; margin-bottom: 8px;">Refunded Tickets</div>
                 ${refundedList}
               </div>
               ` : ""}
-
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top: 1px solid #e5e5e5; padding-top: 16px; margin-top: 8px;">
                 <tr>
                   <td style="font-family: 'Oswald', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 600; color: #0a0a0a;">Refunded</td>
                   <td style="font-family: 'Oswald', Helvetica, Arial, sans-serif; font-size: 14px; font-weight: 700; color: ${venueAccent}; text-align: right;">$${(refundAmountCents / 100).toFixed(2)}</td>
                 </tr>
               </table>
-
               <p style="font-size: 13px; color: #666; line-height: 1.6; margin: 20px 0 0;">
-                The refund will appear on your original payment method within 5-10 business days. If you have questions, reply to this email.
+                The refund will appear on your original payment method within 5-10 business days. Processing fees are non-refundable per our refund policy. If you have questions, reply to this email.
               </p>
             </td>
           </tr>
@@ -276,7 +283,7 @@ async function sendRefundEmail({ venue, eventRow, order, refundedTickets, refund
     "",
     `Refunded: $${(refundAmountCents / 100).toFixed(2)}`,
     "",
-    "The refund will appear on your original payment method within 5-10 business days.",
+    "The refund will appear on your original payment method within 5-10 business days. Processing fees are non-refundable.",
     `Order ID: ${order.id}`,
   ].join("\n");
 
@@ -297,7 +304,6 @@ async function sendRefundEmail({ venue, eventRow, order, refundedTickets, refund
     });
   } catch (emailErr) {
     console.error("Refund email send failed:", emailErr);
-    // Don't fail the refund — it's already processed at Square
   }
 }
 
@@ -313,9 +319,6 @@ exports.handler = async (event) => {
     return err(405, "Method not allowed");
   }
 
-  // -------------------------------------------------------------------------
-  // 1. Parse and validate body
-  // -------------------------------------------------------------------------
   let body;
   try {
     body = JSON.parse(event.body || "{}");
@@ -333,9 +336,11 @@ exports.handler = async (event) => {
     return err(400, "ticketIds is required for mode='tickets'");
   }
 
-  // -------------------------------------------------------------------------
-  // 2. Load the order
-  // -------------------------------------------------------------------------
+  const reasonResult = validateReason(reason);
+  if (!reasonResult.ok) {
+    return err(400, reasonResult.error);
+  }
+
   const { data: order, error: orderErr } = await supabase
     .from("ticket_orders")
     .select("*")
@@ -350,9 +355,6 @@ exports.handler = async (event) => {
     return err(400, "Order has no Square payment to refund");
   }
 
-  // -------------------------------------------------------------------------
-  // 3. Authorize the caller
-  // -------------------------------------------------------------------------
   const authHeader = event.headers["authorization"] || event.headers["Authorization"] || "";
   const authToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
 
@@ -361,9 +363,6 @@ exports.handler = async (event) => {
     return err(403, `Forbidden: ${authResult.reason}`);
   }
 
-  // -------------------------------------------------------------------------
-  // 4. Load tickets for this order
-  // -------------------------------------------------------------------------
   const { data: allTickets, error: ticketsErr } = await supabase
     .from("tickets")
     .select("*")
@@ -371,14 +370,10 @@ exports.handler = async (event) => {
 
   if (ticketsErr || !allTickets) return err(500, "Failed to load tickets");
 
-  // -------------------------------------------------------------------------
-  // 5. Determine which tickets are being refunded + run policy checks
-  // -------------------------------------------------------------------------
   let ticketsToRefund;
   let refundAmountCents;
 
   if (mode === "full") {
-    // Full order refund: every ticket must be 'valid' (no one checked in)
     const checkedIn = allTickets.filter((t) => t.status === "checked_in");
     if (checkedIn.length > 0) {
       const firstCheckin = checkedIn[0];
@@ -393,13 +388,10 @@ exports.handler = async (event) => {
       return err(409, "All tickets in this order are already refunded");
     }
 
-    // Refund only tickets that haven't been refunded already
     ticketsToRefund = allTickets.filter((t) => t.status === "valid");
-    // Full refund returns the whole order's total (minus already-refunded amounts)
     refundAmountCents = order.total_cents - (order.refund_amount_cents || 0);
 
   } else {
-    // Per-ticket refund
     const requestedSet = new Set(ticketIds);
     ticketsToRefund = allTickets.filter((t) => requestedSet.has(t.id));
 
@@ -418,28 +410,38 @@ exports.handler = async (event) => {
       });
     }
 
-    // Per-ticket refund amount = face value of each ticket type, no processing fee
-    // We need each ticket's ticket_type price
-    const ttIds = [...new Set(ticketsToRefund.map((t) => t.ticket_type_id))];
-    const { data: ticketTypes } = await supabase
-      .from("ticket_types")
-      .select("id, price_cents")
-      .in("id", ttIds);
-    const priceById = new Map((ticketTypes || []).map((tt) => [tt.id, tt.price_cents]));
+    // ========================================================================
+    // CHANGE FROM v2: use captured price_paid_cents per ticket, NOT current
+    // ticket_types.price_cents. This means the refund returns what the buyer
+    // actually paid, even if the venue has changed the price since.
+    //
+    // Fallback: if price_paid_cents is NULL (legacy tickets from before the
+    // migration), fall back to current ticket_types.price_cents. Backfill SQL
+    // should already have set this for all existing tickets, so the fallback
+    // is defensive.
+    // ========================================================================
+    const ticketsMissingPrice = ticketsToRefund.filter((t) => t.price_paid_cents == null);
+    let priceByTicketTypeFallback = new Map();
 
-    refundAmountCents = ticketsToRefund.reduce(
-      (sum, t) => sum + (priceById.get(t.ticket_type_id) || 0),
-      0
-    );
+    if (ticketsMissingPrice.length > 0) {
+      const ttIds = [...new Set(ticketsMissingPrice.map((t) => t.ticket_type_id))];
+      const { data: ticketTypes } = await supabase
+        .from("ticket_types")
+        .select("id, price_cents")
+        .in("id", ttIds);
+      priceByTicketTypeFallback = new Map((ticketTypes || []).map((tt) => [tt.id, tt.price_cents]));
+    }
+
+    refundAmountCents = ticketsToRefund.reduce((sum, t) => {
+      const price = t.price_paid_cents ?? priceByTicketTypeFallback.get(t.ticket_type_id) ?? 0;
+      return sum + price;
+    }, 0);
 
     if (refundAmountCents <= 0) {
       return err(400, "Computed refund amount is zero");
     }
   }
 
-  // -------------------------------------------------------------------------
-  // 6. Load venue for Square credentials
-  // -------------------------------------------------------------------------
   const { data: venue, error: venueErr } = await supabase
     .from("venues")
     .select("id, name, brand_colors, currency, square_access_token, square_environment")
@@ -449,9 +451,6 @@ exports.handler = async (event) => {
   if (venueErr || !venue) return err(500, "Venue not found");
   if (!venue.square_access_token) return err(500, "Venue has no Square credentials");
 
-  // -------------------------------------------------------------------------
-  // 7. Call Square's refund API
-  // -------------------------------------------------------------------------
   let refund;
   try {
     refund = await squareRefundPayment(
@@ -459,7 +458,7 @@ exports.handler = async (event) => {
       order.square_payment_id,
       refundAmountCents,
       venue.currency || "USD",
-      reason || (mode === "full" ? "Full order refund" : "Per-ticket refund")
+      reasonResult.displayLabel
     );
   } catch (squareErr) {
     console.error("Square refund failed:", squareErr.squareErrors || squareErr);
@@ -468,16 +467,8 @@ exports.handler = async (event) => {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // 8. Update database — tickets first, then order
-  //
-  // Order matters: if we update the order to 'refunded' first and then crash,
-  // tickets would be in inconsistent state. Doing tickets first means even on
-  // crash the order is still 'paid' and we can retry the refund.
-  // -------------------------------------------------------------------------
   const refundedAt = new Date().toISOString();
 
-  // Mark refunded tickets
   await supabase
     .from("tickets")
     .update({
@@ -487,8 +478,6 @@ exports.handler = async (event) => {
     })
     .in("id", ticketsToRefund.map((t) => t.id));
 
-  // Decrement quantity_sold on each affected ticket type
-  // (We need to do this per-type, grouping the refunded tickets)
   const refundCountByType = ticketsToRefund.reduce((acc, t) => {
     acc[t.ticket_type_id] = (acc[t.ticket_type_id] || 0) + 1;
     return acc;
@@ -508,7 +497,6 @@ exports.handler = async (event) => {
     }
   }
 
-  // Update the order
   const remainingValid = await supabase
     .from("tickets")
     .select("id", { count: "exact", head: true })
@@ -525,24 +513,18 @@ exports.handler = async (event) => {
       status: newOrderStatus,
       refunded_at: newOrderStatus === "refunded" ? refundedAt : order.refunded_at,
       refunded_by: newOrderStatus === "refunded" ? authResult.userId : order.refunded_by,
-      refund_reason: reason || order.refund_reason || null,
+      refund_reason: reasonResult.normalizedReason,
       refund_amount_cents: cumulativeRefund,
       square_refund_id: refund.id,
     })
     .eq("id", order.id);
 
-  // -------------------------------------------------------------------------
-  // 9. Load event for the email (best effort — if it fails, refund still succeeds)
-  // -------------------------------------------------------------------------
   const { data: eventRow } = await supabase
     .from("events")
     .select("name, starts_at")
     .eq("id", order.event_id)
     .single();
 
-  // -------------------------------------------------------------------------
-  // 10. Email the buyer
-  // -------------------------------------------------------------------------
   await sendRefundEmail({
     venue,
     eventRow,
@@ -552,9 +534,6 @@ exports.handler = async (event) => {
     mode,
   });
 
-  // -------------------------------------------------------------------------
-  // 11. Return success
-  // -------------------------------------------------------------------------
   return ok({
     orderId: order.id,
     mode,
@@ -562,5 +541,6 @@ exports.handler = async (event) => {
     refundAmountCents,
     squareRefundId: refund.id,
     newOrderStatus,
+    reason: reasonResult.displayLabel,
   });
 };

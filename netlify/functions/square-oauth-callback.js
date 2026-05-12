@@ -3,16 +3,19 @@
  * WAITLESS — Square OAuth Callback
  * Netlify Serverless Function
  * ============================================
- * 
+ *
  * Path: netlify/functions/square-oauth-callback.js
- * 
+ *
+ * UPDATED: now saves merchant_id to the venues table during OAuth, so the
+ * ticket webhook can route incoming payment events by merchant.
+ *
  * FLOW:
  * 1. Vendor clicks "Connect Square" in admin dashboard
  * 2. Gets redirected to Square's OAuth authorization page
  * 3. Vendor logs in and clicks "Allow"
  * 4. Square redirects back here with an authorization code
- * 5. We exchange the code for an access token
- * 6. Save the token + merchant info to the venue row in Supabase
+ * 5. We exchange the code for an access token + merchant_id
+ * 6. Save token + merchant_id + location to the venue row
  * 7. Redirect vendor back to their admin dashboard
  * ============================================
  */
@@ -43,7 +46,7 @@ exports.handler = async (event) => {
 
   // Build the exact same redirect_uri that AdminView used when initiating the
   // OAuth flow. Square requires this to match byte-for-byte during the
-  // token exchange, otherwise it returns MISSING_REQUIRED_PARAMETER.
+  // token exchange.
   const baseUrl = process.env.URL || 'https://waitlss.netlify.app';
   const redirectUri = `${baseUrl}/.netlify/functions/square-oauth-callback`;
 
@@ -75,7 +78,7 @@ exports.handler = async (event) => {
       access_token,
       refresh_token,
       expires_at,
-      merchant_id,
+      merchant_id, // <-- NEW: we save this now
     } = tokenData;
 
     // Get the merchant's locations to find their primary location ID
@@ -99,6 +102,7 @@ exports.handler = async (event) => {
     }
 
     // Save credentials to the venue row
+    // NEW: square_merchant_id is now persisted so the ticket webhook can route by it
     const { error: updateError } = await supabase
       .from('venues')
       .update({
@@ -106,6 +110,7 @@ exports.handler = async (event) => {
         square_access_token: access_token,
         square_location_id: locationId,
         square_environment: 'production',
+        square_merchant_id: merchant_id, // <-- NEW
       })
       .eq('id', venueId);
 
@@ -124,12 +129,9 @@ exports.handler = async (event) => {
 };
 
 function redirect(venueId, queryParam) {
-  // Look up venue slug from ID so we can redirect to the right admin page
-  // For now, redirect to root admin — the frontend will handle it
   const baseUrl = process.env.URL || 'https://waitlss.netlify.app';
 
   if (venueId) {
-    // We need the slug but only have the ID — redirect with venue ID as param
     return {
       statusCode: 302,
       headers: {

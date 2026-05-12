@@ -1,33 +1,32 @@
 /**
  * ============================================
- * WAITLESS — Square Payment Webhook (Multi-Venue)
+ * WAITLESS — Square Payment Webhook (Multi-Venue, Corrected)
  * Netlify Serverless Function
  * ============================================
  *
  * Path: netlify/functions/ticket-webhook.js
  *
- * MULTI-VENUE VERSION. Each venue connects their own Square account, and
- * each has their own webhook signature key. This function:
+ * CORRECTED ARCHITECTURE:
  *
- *   1. Parses the incoming payload to find the merchant_id Square sent it from
- *   2. Looks up the venue with that merchant_id in our database
- *   3. Uses THAT venue's signature key to verify the request
- *   4. Proceeds with the rest of the flow (the actual ticket creation)
+ * Square's webhook signing is at the APPLICATION level, not per-merchant.
+ * All venues that OAuth into the Waitless Square app share the same webhook
+ * subscription (configured by the platform owner in the Square Developer
+ * Dashboard at developer.squareup.com/apps).
  *
- * If we can't find a venue matching the merchant_id, we reject — that
- * payment isn't from a Waitless venue, or the venue hasn't finished onboarding.
+ * The webhook payload's `merchant_id` field tells us WHICH venue a given
+ * payment belongs to. We use that to route to the correct venue's row.
  *
- * SETUP (per venue, during onboarding):
- *   1. Venue connects Square via OAuth (already built — square-oauth-callback.js)
- *   2. Venue creates a webhook subscription in their Square Developer Dashboard:
- *      - URL: https://waitless.events/.netlify/functions/ticket-webhook
- *      - Event: payment.updated
- *   3. Square shows them a signature key; they paste it into Waitless admin
- *   4. We save it to venues.square_webhook_signature_key
+ * So:
+ *   - SQUARE_WEBHOOK_SIGNATURE_KEY env var = platform-wide, set by you once
+ *   - venues.square_merchant_id = per-venue, populated during OAuth or manual backfill
+ *   - venues.square_webhook_signature_key column = unused (kept for now in case
+ *     future Square multi-app patterns require it)
  *
- * For the first launch (TRFQ-only), the manual step is: get Ashley's signature
- * key after she configures her Square webhook, and UPDATE venues directly
- * via the SQL editor. Admin UI to capture this can come later.
+ * Flow:
+ *   1. Verify request signature using the single platform signature key
+ *   2. Parse payload → get merchant_id
+ *   3. Look up the venue with that merchant_id
+ *   4. Proceed with ticket creation for that venue
  * ============================================
  */
 
@@ -277,11 +276,21 @@ exports.handler = async (event) => {
   const notificationUrl = `${process.env.URL || "https://waitless.events"}/.netlify/functions/ticket-webhook`;
 
   // -------------------------------------------------------------------------
-  // 1. Parse payload (BEFORE signature verification) to find the merchant_id
-  //
-  // We parse the JSON first so we can look up the right signature key. This
-  // is safe — we don't trust ANY data until signature verification passes.
-  // We just use the merchant_id to find which key to verify against.
+  // 1. Verify signature using the PLATFORM signature key
+  // -------------------------------------------------------------------------
+  const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY;
+  if (!signatureKey) {
+    console.error("SQUARE_WEBHOOK_SIGNATURE_KEY env var not set");
+    return { statusCode: 500, body: "Webhook not configured" };
+  }
+
+  if (!verifySquareSignature(rawBody, signatureHeader, signatureKey, notificationUrl)) {
+    console.warn("Invalid Square webhook signature — possible spoofing");
+    return { statusCode: 401, body: "Invalid signature" };
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Parse payload
   // -------------------------------------------------------------------------
   let payload;
   try {
@@ -289,45 +298,6 @@ exports.handler = async (event) => {
   } catch {
     return { statusCode: 400, body: "Invalid JSON" };
   }
-
-  const merchantId = payload.merchant_id || payload.merchantId;
-  if (!merchantId) {
-    console.warn("Webhook missing merchant_id");
-    return { statusCode: 400, body: "Missing merchant_id" };
-  }
-
-  // -------------------------------------------------------------------------
-  // 2. Look up the venue by merchant_id
-  // -------------------------------------------------------------------------
-  const { data: venue, error: venueErr } = await supabase
-    .from("venues")
-    .select("id, slug, name, brand_colors, square_webhook_signature_key, square_access_token, square_environment, square_merchant_id")
-    .eq("square_merchant_id", merchantId)
-    .eq("is_active", true)
-    .single();
-
-  if (venueErr || !venue) {
-    console.warn(`Webhook from unknown merchant_id: ${merchantId}`);
-    // Return 200 so Square doesn't retry — this merchant isn't a Waitless venue
-    return { statusCode: 200, body: "Unknown merchant" };
-  }
-
-  if (!venue.square_webhook_signature_key) {
-    console.error(`Venue ${venue.slug} has no webhook signature key configured`);
-    return { statusCode: 500, body: "Webhook key not configured for this venue" };
-  }
-
-  // -------------------------------------------------------------------------
-  // 3. Verify signature with THIS venue's key
-  // -------------------------------------------------------------------------
-  if (!verifySquareSignature(rawBody, signatureHeader, venue.square_webhook_signature_key, notificationUrl)) {
-    console.warn(`Invalid signature on webhook for venue ${venue.slug} — possible spoofing`);
-    return { statusCode: 401, body: "Invalid signature" };
-  }
-
-  // -------------------------------------------------------------------------
-  // 4. From here on, identical to single-venue version — the merchant is verified
-  // -------------------------------------------------------------------------
 
   if (payload.type !== "payment.updated") {
     return { statusCode: 200, body: "Ignored — not a payment event" };
@@ -342,15 +312,36 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: `Ignored — payment status is ${payment.status}` };
   }
 
-  const orderId = payment.referenceId || payment.reference_id || payment.order?.referenceId;
-  if (!orderId) {
-    console.error("payment.updated missing reference_id — cannot link to ticket order", payment.id);
-    return { statusCode: 200, body: "Ignored — no reference_id" };
+  // -------------------------------------------------------------------------
+  // 3. Route by merchant_id — find the venue this payment belongs to
+  // -------------------------------------------------------------------------
+  const merchantId = payload.merchant_id || payload.merchantId;
+  if (!merchantId) {
+    console.warn("Webhook missing merchant_id");
+    return { statusCode: 200, body: "No merchant_id" };
+  }
+
+  const { data: venue, error: venueErr } = await supabase
+    .from("venues")
+    .select("id, slug, name, brand_colors, square_access_token, square_environment, square_merchant_id")
+    .eq("square_merchant_id", merchantId)
+    .eq("is_active", true)
+    .single();
+
+  if (venueErr || !venue) {
+    console.warn(`Webhook from unknown merchant_id: ${merchantId} — venue may not have merchant_id backfilled yet`);
+    return { statusCode: 200, body: "Unknown merchant" };
   }
 
   // -------------------------------------------------------------------------
-  // 5. Look up our pending order
+  // 4. Look up the order via reference_id (our ticket_orders.id)
   // -------------------------------------------------------------------------
+  const orderId = payment.referenceId || payment.reference_id || payment.order?.referenceId;
+  if (!orderId) {
+    console.error("payment.updated missing reference_id");
+    return { statusCode: 200, body: "Ignored — no reference_id" };
+  }
+
   const { data: order, error: orderErr } = await supabase
     .from("ticket_orders")
     .select("*")
@@ -358,18 +349,17 @@ exports.handler = async (event) => {
     .single();
 
   if (orderErr || !order) {
-    console.error("No ticket_order found for reference_id", orderId, orderErr);
+    console.error("No ticket_order found for reference_id", orderId);
     return { statusCode: 200, body: "No matching order" };
   }
 
-  // Defense-in-depth: confirm the order belongs to this venue
   if (order.venue_id !== venue.id) {
-    console.error(`Order ${orderId} belongs to venue ${order.venue_id} but webhook came from ${venue.id}`);
+    console.error(`Order ${orderId} belongs to venue ${order.venue_id} but webhook came from merchant ${merchantId} (venue ${venue.id})`);
     return { statusCode: 401, body: "Order/venue mismatch" };
   }
 
   // -------------------------------------------------------------------------
-  // 6. Idempotency
+  // 5. Idempotency
   // -------------------------------------------------------------------------
   if (order.status === "paid") {
     return { statusCode: 200, body: "Already processed" };
@@ -379,7 +369,7 @@ exports.handler = async (event) => {
   }
 
   // -------------------------------------------------------------------------
-  // 7. Load event
+  // 6. Load event
   // -------------------------------------------------------------------------
   const { data: eventRow, error: eventErr } = await supabase
     .from("events")
@@ -388,12 +378,12 @@ exports.handler = async (event) => {
     .single();
 
   if (eventErr || !eventRow) {
-    console.error("Event not found for order", orderId, eventErr);
+    console.error("Event not found for order", orderId);
     return { statusCode: 200, body: "Event missing" };
   }
 
   // -------------------------------------------------------------------------
-  // 8. Reconstruct ticket selections from Square order line items
+  // 7. Reconstruct selections from Square order
   // -------------------------------------------------------------------------
   let selections = [];
   if (order.square_order_id) {
@@ -401,29 +391,21 @@ exports.handler = async (event) => {
   }
 
   if (selections.length === 0) {
-    console.error("Could not reconstruct ticket selections for order", orderId);
-    await supabase
-      .from("ticket_orders")
-      .update({ status: "failed" })
-      .eq("id", orderId);
-    return { statusCode: 200, body: "Could not determine tickets purchased" };
+    console.error("Could not reconstruct selections for order", orderId);
+    await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", orderId);
+    return { statusCode: 200, body: "Selections lost" };
   }
 
   // -------------------------------------------------------------------------
-  // 9. Re-validate inventory + increment quantity_sold
+  // 8. Validate inventory + increment
   // -------------------------------------------------------------------------
   const ttIds = [...new Set(selections.map((s) => s.ticketTypeId))];
-  const { data: ticketTypes, error: ttErr } = await supabase
+  const { data: ticketTypes } = await supabase
     .from("ticket_types")
     .select("*")
     .in("id", ttIds);
 
-  if (ttErr || !ticketTypes) {
-    console.error("Failed to load ticket types for order", orderId, ttErr);
-    return { statusCode: 200, body: "Ticket type lookup failed" };
-  }
-
-  const ttById = new Map(ticketTypes.map((t) => [t.id, t]));
+  const ttById = new Map((ticketTypes || []).map((t) => [t.id, t]));
 
   for (const sel of selections) {
     const tt = ttById.get(sel.ticketTypeId);
@@ -431,12 +413,9 @@ exports.handler = async (event) => {
     if (tt.quantity_total != null) {
       const remaining = tt.quantity_total - (tt.quantity_sold || 0);
       if (sel.qty > remaining) {
-        console.error(`OVERSOLD on order ${orderId}: ${tt.name} needs ${sel.qty} but only ${remaining} remain`);
-        await supabase
-          .from("ticket_orders")
-          .update({ status: "failed" })
-          .eq("id", orderId);
-        return { statusCode: 200, body: "Oversold — order flagged for refund" };
+        console.error(`OVERSOLD ${orderId}: ${tt.name} needs ${sel.qty} but ${remaining} remain`);
+        await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", orderId);
+        return { statusCode: 200, body: "Oversold — flagged for refund" };
       }
     }
   }
@@ -451,7 +430,7 @@ exports.handler = async (event) => {
   }
 
   // -------------------------------------------------------------------------
-  // 10. Generate tickets
+  // 9. Create tickets
   // -------------------------------------------------------------------------
   const ticketsToInsert = [];
   for (const sel of selections) {
@@ -480,7 +459,7 @@ exports.handler = async (event) => {
   }
 
   // -------------------------------------------------------------------------
-  // 11. Flip order to paid
+  // 10. Flip to paid
   // -------------------------------------------------------------------------
   await supabase
     .from("ticket_orders")
@@ -492,7 +471,7 @@ exports.handler = async (event) => {
     .eq("id", order.id);
 
   // -------------------------------------------------------------------------
-  // 12. Generate QR images + send email
+  // 11. Email
   // -------------------------------------------------------------------------
   const ticketsWithType = insertedTickets.map((t) => ({
     ...t,
@@ -528,10 +507,7 @@ exports.handler = async (event) => {
     });
 
     if (!emailResp.ok) {
-      const errText = await emailResp.text();
-      console.error(`Resend rejected ticket email for order ${orderId}:`, errText);
-    } else {
-      console.log(`Ticket email sent for order ${orderId}`);
+      console.error(`Resend rejected email for order ${orderId}:`, await emailResp.text());
     }
   } catch (emailErr) {
     console.error(`Email send threw for order ${orderId}:`, emailErr);
@@ -544,14 +520,11 @@ exports.handler = async (event) => {
 };
 
 // ============================================================================
-// HELPER: reconstruct ticket selections from Square order line items
+// HELPER: load selections from Square order
 // ============================================================================
 
 async function loadSelectionsFromSquareOrder(order, venue) {
-  if (!venue.square_access_token) {
-    console.error("No Square access token for venue", venue.id);
-    return [];
-  }
+  if (!venue.square_access_token) return [];
 
   const baseUrl = venue.square_environment === "production"
     ? "https://connect.squareup.com"
@@ -565,11 +538,7 @@ async function loadSelectionsFromSquareOrder(order, venue) {
       },
     });
 
-    if (!resp.ok) {
-      console.error("Square retrieve order failed", await resp.text());
-      return [];
-    }
-
+    if (!resp.ok) return [];
     const data = await resp.json();
     const lineItems = data.order?.line_items || [];
 

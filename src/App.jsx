@@ -378,9 +378,11 @@ export default function App() {
     redirectToAdmin();
   }, [isOAuthComplete]);
 
-  // Legal pages — no venue needed
-  if (isPrivacy) return <PrivacyPolicy />;
-  if (isTerms) return <TermsOfService />;
+ // Legal pages — no venue needed
+if (isPrivacy) return <PrivacyPolicy />;
+if (isTerms) return <TermsOfService />;
+if (isRefundPolicy) return <RefundPolicy />;
+if (isVenueTerms) return <VenueTerms />;
 
   // Signup page — no venue needed
   if (isSignup) {

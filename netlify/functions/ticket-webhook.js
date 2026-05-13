@@ -1,20 +1,28 @@
 /**
  * ============================================
- * WAITLESS — Square Payment Webhook (v3 — captures price_paid_cents)
+ * WAITLESS — Square Payment Webhook (v4 — hosted checkout fix)
  * Netlify Serverless Function
  * ============================================
  *
  * Path: netlify/functions/ticket-webhook.js
  *
- * CHANGE FROM v2 (PLATFORM-LEVEL SIGNATURE KEY):
- *   When inserting tickets after a payment, capture the price the buyer
- *   actually paid for that ticket type (price_paid_cents). This decouples
- *   ticket prices from the current ticket_types.price_cents, supporting:
- *     - Price changes for future buyers without affecting historical sales
- *     - Accurate refunds (refund what they paid, not current price)
+ * CHANGE FROM v3 (HOSTED CHECKOUT REFERENCE_ID LOOKUP):
+ *   Square's hosted checkout (CreatePaymentLink) does NOT propagate the
+ *   reference_id from the parent Order onto the Payment object. The
+ *   reference_id sits on the Order itself; the Payment carries only an
+ *   order_id (Square's UUID).
  *
- * Everything else (signature verification, merchant routing, idempotency,
- * email delivery) is unchanged from v2.
+ *   Previous v3 path failed silently with "Ignored — no reference_id"
+ *   because `payment.reference_id` is null for hosted checkout payments.
+ *
+ *   v4 adds a fallback lookup chain:
+ *     1. Try payment.reference_id directly (Web Payments SDK case)
+ *     2. Fallback A: look up our ticket_orders row by square_order_id
+ *        (we saved this in create-ticket-checkout.js)
+ *     3. Fallback B: fetch the Square Order via API and read its
+ *        reference_id (defense in depth for edge cases)
+ *
+ *   v3 logic (price_paid_cents capture, idempotency, etc.) unchanged below.
  * ============================================
  */
 
@@ -311,23 +319,101 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "Unknown merchant" };
   }
 
-  const orderId = payment.referenceId || payment.reference_id || payment.order?.referenceId;
-  if (!orderId) {
-    return { statusCode: 200, body: "Ignored — no reference_id" };
+  // ==========================================================================
+  // CHANGE FROM v3: Find our ticket_orders row via a 3-step lookup chain.
+  //
+  // Square hosted checkout (CreatePaymentLink) does NOT propagate the
+  // reference_id from the parent Order onto the Payment object. So
+  // payment.reference_id is typically NULL for hosted checkout flows.
+  // The reference_id is stored on the Square Order; we have to either:
+  //   (a) match by our stored square_order_id (fast, requires the column to
+  //       have been saved correctly by create-ticket-checkout.js), or
+  //   (b) fetch the Square Order via API and read referenceId from there.
+  //
+  // We try in this order:
+  //   Step 1: payment.reference_id directly (handles Web Payments SDK flows)
+  //   Step 2: payment.order_id → match our ticket_orders.square_order_id
+  //   Step 3: payment.order_id → Square API → Order.reference_id → match by id
+  //
+  // Step 2 is the fast path for hosted checkout. Step 3 is defense in depth.
+  // ==========================================================================
+
+  let order = null;
+  let orderId = payment.reference_id || payment.referenceId || payment.order?.referenceId;
+  const squareOrderId = payment.order_id || payment.orderId;
+
+  // Step 1: try direct reference_id (Web Payments SDK case)
+  if (orderId) {
+    const { data: orderByRef } = await supabase
+      .from("ticket_orders")
+      .select("*")
+      .eq("id", orderId)
+      .maybeSingle();
+    if (orderByRef) order = orderByRef;
   }
 
-  const { data: order, error: orderErr } = await supabase
-    .from("ticket_orders")
-    .select("*")
-    .eq("id", orderId)
-    .single();
+  // Step 2: fallback to lookup by square_order_id (hosted checkout case —
+  // we saved square_order_id in create-ticket-checkout.js after creating the
+  // payment link)
+  if (!order && squareOrderId) {
+    const { data: orderByOrderId } = await supabase
+      .from("ticket_orders")
+      .select("*")
+      .eq("square_order_id", squareOrderId)
+      .maybeSingle();
+    if (orderByOrderId) {
+      order = orderByOrderId;
+      orderId = order.id;
+    }
+  }
 
-  if (orderErr || !order) {
+  // Step 3: last resort — fetch the Square Order via API and read referenceId
+  // (handles cases where create-ticket-checkout.js failed to save
+  // square_order_id, but we can still recover by asking Square)
+  if (!order && squareOrderId && venue.square_access_token) {
+    try {
+      const baseUrl = venue.square_environment === "production"
+        ? "https://connect.squareup.com"
+        : "https://connect.squareupsandbox.com";
+      const resp = await fetch(`${baseUrl}/v2/orders/${squareOrderId}`, {
+        headers: {
+          Authorization: `Bearer ${venue.square_access_token}`,
+          "Square-Version": "2026-01-22",
+        },
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        const refId = data.order?.reference_id || data.order?.referenceId;
+        if (refId) {
+          const { data: orderByApiRef } = await supabase
+            .from("ticket_orders")
+            .select("*")
+            .eq("id", refId)
+            .maybeSingle();
+          if (orderByApiRef) {
+            order = orderByApiRef;
+            orderId = order.id;
+            // Backfill square_order_id since we now know it
+            await supabase
+              .from("ticket_orders")
+              .update({ square_order_id: squareOrderId })
+              .eq("id", refId);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch Square order for reference lookup:", err);
+    }
+  }
+
+  if (!order) {
+    console.warn(`No matching ticket_orders row for payment ${payment.id}, ` +
+      `reference_id=${orderId || "null"}, square_order_id=${squareOrderId || "null"}`);
     return { statusCode: 200, body: "No matching order" };
   }
 
   if (order.venue_id !== venue.id) {
-    console.error(`Order/venue mismatch ${orderId}`);
+    console.error(`Order/venue mismatch ${order.id}`);
     return { statusCode: 401, body: "Order/venue mismatch" };
   }
 
@@ -348,13 +434,23 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "Event missing" };
   }
 
+  // ==========================================================================
+  // CHANGE FROM v3: Use the squareOrderId we already have from the payment
+  // payload (above), falling back to order.square_order_id. v3 only checked
+  // order.square_order_id, which would fail if it never got saved.
+  // ==========================================================================
   let selections = [];
-  if (order.square_order_id) {
-    selections = await loadSelectionsFromSquareOrder(order, venue);
+  const effectiveSquareOrderId = squareOrderId || order.square_order_id;
+  if (effectiveSquareOrderId) {
+    selections = await loadSelectionsFromSquareOrder(
+      { ...order, square_order_id: effectiveSquareOrderId },
+      venue
+    );
   }
 
   if (selections.length === 0) {
-    await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", orderId);
+    console.error(`Selections lost for order ${order.id}, square_order_id=${effectiveSquareOrderId}`);
+    await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", order.id);
     return { statusCode: 200, body: "Selections lost" };
   }
 
@@ -374,8 +470,8 @@ exports.handler = async (event) => {
     if (tt.quantity_total != null) {
       const remaining = tt.quantity_total - (tt.quantity_sold || 0);
       if (sel.qty > remaining) {
-        console.error(`OVERSOLD ${orderId}: ${tt.name} needs ${sel.qty} but ${remaining} remain`);
-        await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", orderId);
+        console.error(`OVERSOLD ${order.id}: ${tt.name} needs ${sel.qty} but ${remaining} remain`);
+        await supabase.from("ticket_orders").update({ status: "failed" }).eq("id", order.id);
         return { statusCode: 200, body: "Oversold — flagged for refund" };
       }
     }
@@ -391,12 +487,7 @@ exports.handler = async (event) => {
       .eq("id", sel.ticketTypeId);
   }
 
-  // ==========================================================================
-  // CHANGE FROM v2: capture price_paid_cents per ticket
-  // We use ticket_types.price_cents AT THE MOMENT OF TICKET CREATION (now).
-  // This is the price the buyer just paid via Square — locked in for this
-  // ticket regardless of future ticket_types.price_cents changes.
-  // ==========================================================================
+  // Capture price_paid_cents per ticket (unchanged from v3)
   const ticketsToInsert = [];
   for (const sel of selections) {
     const tt = ttById.get(sel.ticketTypeId);
@@ -412,7 +503,7 @@ exports.handler = async (event) => {
         attendee_email: order.buyer_email,
         qr_token: generateQrToken(venue.slug),
         status: "valid",
-        price_paid_cents: priceAtPurchase, // NEW
+        price_paid_cents: priceAtPurchase,
       });
     }
   }
@@ -423,7 +514,7 @@ exports.handler = async (event) => {
     .select();
 
   if (ticketErr || !insertedTickets) {
-    console.error("Failed to insert tickets", orderId, ticketErr);
+    console.error("Failed to insert tickets", order.id, ticketErr);
     return { statusCode: 500, body: "Ticket creation failed" };
   }
 
@@ -470,15 +561,15 @@ exports.handler = async (event) => {
     });
 
     if (!emailResp.ok) {
-      console.error(`Resend rejected email for order ${orderId}:`, await emailResp.text());
+      console.error(`Resend rejected email for order ${order.id}:`, await emailResp.text());
     }
   } catch (emailErr) {
-    console.error(`Email send threw for order ${orderId}:`, emailErr);
+    console.error(`Email send threw for order ${order.id}:`, emailErr);
   }
 
   return {
     statusCode: 200,
-    body: JSON.stringify({ success: true, orderId, ticketsIssued: insertedTickets.length }),
+    body: JSON.stringify({ success: true, orderId: order.id, ticketsIssued: insertedTickets.length }),
   };
 };
 

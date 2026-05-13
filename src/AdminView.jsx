@@ -24,6 +24,7 @@ import AnalyticsView from "./AnalyticsView";
 import BillingView from "./BillingView";
 import EventsListView from "./EventsListView";
 import EventEditorView from "./EventEditorView";
+import TicketOrdersView from "./TicketOrdersView";
 export default function AdminView({ venue: initialVenue, BRAND }) {
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login"); // login | signup
@@ -171,6 +172,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           { key: "menu", label: "Menu" },
           { key: "events", label: "Events" },
           { key: "settings", label: "Settings" },
+          { key: "ticket_orders", label: "Ticket Orders" },
           { key: "square", label: "Payments" },
           { key: "qr", label: "QR Code" },
           { key: "billing", label: "Billing" },
@@ -198,6 +200,8 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
         {activeTab === "settings" && (
           <VenueSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
         )}
+        {activeTab === "ticket_orders" && (<TicketOrdersView venue={venue} BRAND={BRAND} />)}
+        
         {activeTab === "square" && (
           <SquareSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
         )}

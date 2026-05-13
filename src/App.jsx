@@ -7,8 +7,10 @@
  * 
  * Multi-tenant app with the original TRFQ styling.
  * URL structure:
- *   waitless.app/{slug}            → Patron ordering view
- *   waitless.app/{slug}/bartender  → Bartender queue view
+ *   waitless.app/{slug}                              → Patron ordering view
+ *   waitless.app/{slug}/bartender                    → Bartender queue view
+ *   waitless.app/{slug}/buy/{eventSlug}              → Buy tickets page (NEW)
+ *   waitless.app/{slug}/buy/{eventSlug}/confirmation → Post-payment confirmation (NEW)
  * 
  * On load:
  * 1. Parses venue slug from URL
@@ -41,6 +43,8 @@ import OnboardingView from "./OnboardingView";
 import MasterAdmin from "./MasterAdmin";
 import InstallPrompt from "./InstallPrompt";
 import { PrivacyPolicy, TermsOfService, RefundPolicy, VenueTerms } from "./LegalPages";
+import BuyTicketsView from "./BuyTicketsView";
+import BuyConfirmationView from "./BuyConfirmationView";
 
 // ============================================
 // URL PARSING
@@ -49,11 +53,21 @@ function getRouteFromUrl() {
   const path = window.location.pathname.replace(/^\/+|\/+$/g, "");
   const parts = path.split("/");
   const slug = parts[0] || null;
+
+  // Existing staff/admin routes
   const isManager = parts[1] === "manager";
   const isBartender = parts[1] === "bartender";
   const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
+
+  // NEW: ticket buy + confirmation routes
+  // /{slug}/buy/{eventSlug}                   → Buy page
+  // /{slug}/buy/{eventSlug}/confirmation      → Confirmation page
+  const isBuy = parts[1] === "buy" && !!parts[2];
+  const eventSlug = isBuy ? parts[2] : null;
+  const isBuyConfirmation = isBuy && parts[3] === "confirmation";
+
   const isSignup = parts[0] === "admin" && parts[1] === "signup";
   const isMasterAdmin = parts[0] === "admin" && parts[1] === "master";
   const isOAuthComplete = parts[0] === "oauth-complete";
@@ -61,7 +75,14 @@ function getRouteFromUrl() {
   const isTerms = parts[0] === "terms";
   const isRefundPolicy = parts[0] === "refund-policy";
   const isVenueTerms = parts[0] === "venue-terms";
-  return { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms, isRefundPolicy, isVenueTerms };;
+
+  return {
+    slug,
+    isManager, isBartender, isKitchen, isQR, isAdmin,
+    isBuy, eventSlug, isBuyConfirmation,
+    isSignup, isMasterAdmin, isOAuthComplete,
+    isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
+  };
 }
 
 // ============================================
@@ -343,7 +364,13 @@ export default function App() {
   const [ageVerified, setAgeVerifiedState] = useState(false);
   const [demoView, setDemoView] = useState("patron");
   const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
-  const { slug, isManager, isBartender, isKitchen, isQR, isAdmin, isSignup, isMasterAdmin, isOAuthComplete, isPrivacy, isTerms, isRefundPolicy, isVenueTerms } = getRouteFromUrl();
+  const {
+    slug,
+    isManager, isBartender, isKitchen, isQR, isAdmin,
+    isBuy, eventSlug, isBuyConfirmation,
+    isSignup, isMasterAdmin, isOAuthComplete,
+    isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
+  } = getRouteFromUrl();
 
   // Set demo view based on URL on mount
   useEffect(() => {
@@ -469,8 +496,9 @@ if (isVenueTerms) return <VenueTerms />;
     <div style={{ minHeight: "100vh", background: BRAND.black, color: BRAND.white, fontFamily: "'Inter', sans-serif" }}>
       <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
-      {/* Demo view switcher bar */}
-      {isDemo && !isAdmin && !isQR && (
+      {/* Demo view switcher bar — hidden on buy/confirmation pages so buyers
+          don't see "BARTENDER MODE" buttons when they're paying for a ticket */}
+      {isDemo && !isAdmin && !isQR && !isBuy && (
         <div style={{
           position: "sticky", top: 0, zIndex: 200,
           background: "#1E4D8C15", borderBottom: "1px solid #1E4D8C33",
@@ -508,7 +536,15 @@ if (isVenueTerms) return <VenueTerms />;
       {needsAgeVerification && (
         <AgeVerification venue={venue} BRAND={BRAND} onVerified={() => setAgeVerifiedState(true)} />
       )}
-      {isAdmin ? (
+
+      {/* Routing — order matters. More specific routes first.
+          Buy confirmation must precede plain buy route so the
+          /confirmation suffix is recognized. */}
+      {isBuyConfirmation ? (
+        <BuyConfirmationView venue={venue} BRAND={BRAND} eventSlug={eventSlug} />
+      ) : isBuy ? (
+        <BuyTicketsView venue={venue} BRAND={BRAND} eventSlug={eventSlug} />
+      ) : isAdmin ? (
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />

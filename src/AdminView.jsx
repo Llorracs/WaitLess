@@ -14,15 +14,16 @@
  * - Add/edit/remove/reorder menu items
  * - Rename, delete, reorder menu CATEGORIES
  * - Enter Square credentials
+ * - Manage ticketed events
  * ============================================
  */
-
 import { useState, useEffect } from "react";
 import { supabase } from "./lib/barOrderService";
 import QRGenerator from "./QRGenerator";
 import AnalyticsView from "./AnalyticsView";
 import BillingView from "./BillingView";
-
+import EventsListView from "./EventsListView";
+import EventEditorView from "./EventEditorView";
 export default function AdminView({ venue: initialVenue, BRAND }) {
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login"); // login | signup
@@ -30,33 +31,27 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
-
   const [venue, setVenue] = useState(initialVenue);
   const [menu, setMenu] = useState([]);
-  const [activeTab, setActiveTab] = useState("analytics"); // analytics | menu | settings | square | qr
+  const [activeTab, setActiveTab] = useState("analytics"); // analytics | menu | events | settings | square | qr | billing
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
-
   // Check for existing session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user || null);
       setAuthLoading(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user || null);
     });
-
     return () => subscription.unsubscribe();
   }, []);
-
   // Load menu when authenticated
   useEffect(() => {
     if (!user || !venue) return;
     loadMenu();
   }, [user, venue?.id]);
-
   async function loadMenu() {
     const { data, error } = await supabase
       .from("menus")
@@ -66,7 +61,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
       .order("sort_order");
     if (!error) setMenu(data || []);
   }
-
   // Load full venue data (including fields not in the public function)
   useEffect(() => {
     if (!user || !venue) return;
@@ -80,7 +74,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
     }
     loadFullVenue();
   }, [user]);
-
   // Auth handlers
   const handleLogin = async () => {
     setAuthError(null);
@@ -89,7 +82,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
     if (error) setAuthError(error.message);
     setAuthLoading(false);
   };
-
   const handleSignup = async () => {
     setAuthError(null);
     setAuthLoading(true);
@@ -104,18 +96,15 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
     }
     setAuthLoading(false);
   };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setUser(null);
   };
-
   // Flash save message
   const showSaved = (msg = "Saved") => {
     setSaveMessage(msg);
     setTimeout(() => setSaveMessage(null), 2000);
   };
-
   // ---- AUTH SCREEN ----
   if (authLoading) {
     return (
@@ -125,19 +114,16 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
       </div>
     );
   }
-
   if (!user) {
     return (
       <div style={S.centered}>
         <div style={S.authCard}>
           <h1 style={S.authLogo}>WAITLESS</h1>
           <p style={S.authSub}>Venue Admin — {venue.name}</p>
-
           <div style={S.authTabs}>
             <button onClick={() => { setAuthMode("login"); setAuthError(null); }} style={{ ...S.authTab, ...(authMode === "login" ? S.authTabActive : {}) }}>Log In</button>
             <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ ...S.authTab, ...(authMode === "signup" ? S.authTabActive : {}) }}>Sign Up</button>
           </div>
-
           <input
             type="email"
             placeholder="Email"
@@ -153,9 +139,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
             onKeyDown={(e) => e.key === "Enter" && (authMode === "login" ? handleLogin() : handleSignup())}
             style={S.input}
           />
-
           {authError && <p style={S.error}>{authError}</p>}
-
           <button
             onClick={authMode === "login" ? handleLogin : handleSignup}
             style={S.authButton}
@@ -166,7 +150,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
       </div>
     );
   }
-
   // ---- ADMIN DASHBOARD ----
   return (
     <div style={S.container}>
@@ -181,12 +164,12 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <button onClick={handleLogout} style={S.logoutBtn}>LOG OUT</button>
         </div>
       </div>
-
       {/* Tab nav */}
       <div style={S.tabBar}>
         {[
           { key: "analytics", label: "Analytics" },
           { key: "menu", label: "Menu" },
+          { key: "events", label: "Events" },
           { key: "settings", label: "Settings" },
           { key: "square", label: "Payments" },
           { key: "qr", label: "QR Code" },
@@ -201,7 +184,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           </button>
         ))}
       </div>
-
       {/* Content */}
       <div style={S.content}>
         {activeTab === "analytics" && (
@@ -209,6 +191,9 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
         )}
         {activeTab === "menu" && (
           <MenuBuilder venue={venue} setVenue={setVenue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} />
+        )}
+        {activeTab === "events" && (
+          <EventsTab venue={venue} BRAND={BRAND} />
         )}
         {activeTab === "settings" && (
           <VenueSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
@@ -223,7 +208,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <BillingView venue={venue} BRAND={BRAND} />
         )}
       </div>
-
       {/* Preview link */}
       <div style={S.previewBar}>
         <a href={`/${venue.slug}`} target="_blank" rel="noopener noreferrer" style={S.previewLink}>
@@ -236,7 +220,6 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
     </div>
   );
 }
-
 // ============================================
 // MENU BUILDER
 // ============================================
@@ -245,7 +228,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   const [newItem, setNewItem] = useState(null);
   const [newCategory, setNewCategory] = useState("");
   const [showNewCategory, setShowNewCategory] = useState(false);
-
   // Modifier editor state — when modifierItemId is set, we show the mod editor
   // instead of the normal menu list
   const [modifierItemId, setModifierItemId] = useState(null);
@@ -254,7 +236,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   const [editingOption, setEditingOption] = useState(null);
   const [newGroupName, setNewGroupName] = useState("");
   const [showCopyPicker, setShowCopyPicker] = useState(false);
-
   // ============================
   // CATEGORY ORDERING
   // ============================
@@ -268,7 +249,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     const extras = present.filter((c) => !saved.includes(c)).sort();
     return [...saved, ...extras];
   };
-
   const persistCategoryOrder = async (newOrder) => {
     const { error } = await supabase
       .from("venues")
@@ -281,7 +261,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     }
     setVenue((prev) => ({ ...prev, category_order: newOrder }));
   };
-
   const moveCategory = async (cat, direction) => {
     const current = orderedCategories();
     const idx = current.indexOf(cat);
@@ -292,7 +271,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
     await persistCategoryOrder(reordered);
   };
-
   const renameCategory = async (oldName, newName) => {
     const trimmed = (newName || "").trim();
     if (!trimmed || trimmed === oldName) return;
@@ -315,7 +293,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     await onSave();
     showSaved(`Renamed to "${trimmed}"`);
   };
-
   const deleteCategory = async (cat) => {
     const itemsInCat = menu.filter((m) => m.category === cat);
     const confirmText = itemsInCat.length > 0
@@ -337,7 +314,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     await onSave();
     showSaved(`Removed "${cat}"`);
   };
-
   // Create a new empty category — adds it to the venue's category_order array
   // so it appears in the admin UI even before any items exist.
   const handleCreateEmptyCategory = async () => {
@@ -357,7 +333,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     setNewCategory("");
     showSaved(`Created "${trimmed}"`);
   };
-
   // ============================
   // ITEM HANDLERS (unchanged)
   // ============================
@@ -396,13 +371,11 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     setEditingItem(null);
     setNewItem(null);
   };
-
   const handleDeleteItem = async (id) => {
     if (!confirm("Remove this item?")) return;
     const { error } = await supabase.from("menus").delete().eq("id", id);
     if (!error) { await onSave(); showSaved("Item removed"); }
   };
-
   const handleToggleActive = async (item) => {
     const { error } = await supabase
       .from("menus")
@@ -410,7 +383,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       .eq("id", item.id);
     if (!error) { await onSave(); showSaved(item.active ? "Item hidden" : "Item visible"); }
   };
-
   // ============================
   // MODIFIER MANAGEMENT
   // ============================
@@ -432,12 +404,10 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       options: (options || []).filter((o) => o.modifier_id === g.id),
     })));
   }
-
   const openModifiers = async (itemId) => {
     setModifierItemId(itemId);
     await loadModifiers(itemId);
   };
-
   const closeModifiers = () => {
     setModifierItemId(null);
     setModGroups([]);
@@ -446,7 +416,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     setNewGroupName("");
     setShowCopyPicker(false);
   };
-
   const addModGroup = async () => {
     if (!newGroupName.trim()) return;
     const { error } = await supabase.from("menu_modifiers").insert({
@@ -461,7 +430,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     await loadModifiers(modifierItemId);
     showSaved("Group added");
   };
-
   const updateModGroup = async (group) => {
     const { error } = await supabase
       .from("menu_modifiers")
@@ -476,7 +444,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     setEditingGroup(null);
     showSaved("Group updated");
   };
-
   const deleteModGroup = async (groupId) => {
     if (!confirm("Delete this modifier group and all its options?")) return;
     await supabase.from("modifier_options").delete().eq("modifier_id", groupId);
@@ -485,7 +452,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     await loadModifiers(modifierItemId);
     showSaved("Group removed");
   };
-
   const addOption = async (groupId) => {
     const { error } = await supabase.from("modifier_options").insert({
       modifier_id: groupId,
@@ -497,7 +463,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     if (error) { showSaved("Add failed"); return; }
     await loadModifiers(modifierItemId);
   };
-
   const updateOption = async (opt) => {
     const { error } = await supabase
       .from("modifier_options")
@@ -512,13 +477,11 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     await loadModifiers(modifierItemId);
     setEditingOption(null);
   };
-
   const deleteOption = async (optId) => {
     const { error } = await supabase.from("modifier_options").delete().eq("id", optId);
     if (error) { showSaved("Delete failed"); return; }
     await loadModifiers(modifierItemId);
   };
-
   // Copy all modifier groups + options from a source item to the current item
   // Using "add" semantics: existing groups are preserved, copied groups are appended
   const copyModifiersFromItem = async (sourceItemId) => {
@@ -533,7 +496,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       setShowCopyPicker(false);
       return;
     }
-
     // 2. Fetch all options for those groups
     const sourceGroupIds = sourceGroups.map((g) => g.id);
     const { data: sourceOptions, error: oErr } = await supabase
@@ -542,10 +504,8 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       .in("modifier_id", sourceGroupIds)
       .order("sort_order");
     if (oErr) { showSaved("Copy failed"); return; }
-
     // 3. Determine starting sort_order to append after any existing groups
     const baseSort = modGroups.length;
-
     // 4. Insert duplicated groups, one at a time so we can map old IDs → new IDs
     for (let i = 0; i < sourceGroups.length; i++) {
       const g = sourceGroups[i];
@@ -566,7 +526,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         return;
       }
       const newGroup = newGroupRows[0];
-
       // 5. For each option of that source group, insert a copy pointing at the new group
       const optionsForGroup = (sourceOptions || []).filter((o) => o.modifier_id === g.id);
       if (optionsForGroup.length > 0) {
@@ -588,15 +547,12 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         }
       }
     }
-
     await loadModifiers(modifierItemId);
     setShowCopyPicker(false);
     showSaved(`Copied ${sourceGroups.length} modifier group${sourceGroups.length === 1 ? "" : "s"}`);
   };
-
   const ordered = orderedCategories();
   const modifierItem = menu.find((m) => m.id === modifierItemId);
-
   // Items that have modifier groups (useful sources for the copy picker)
   // Note: we derive this lazily when the copy picker opens, since it needs a DB roundtrip
   const [copyCandidates, setCopyCandidates] = useState([]);
@@ -616,7 +572,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     }
     loadCandidates();
   }, [showCopyPicker, modifierItemId, venue?.id, menu]);
-
   // ---- MODIFIER EDITOR VIEW ----
   // When modifierItemId is set, show the modifier editor instead of the menu list
   if (modifierItemId && modifierItem) {
@@ -631,7 +586,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         <p style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
           Customization options patrons can pick when ordering this item (e.g., Size, Mixer, Ice).
         </p>
-
         {/* Copy from another item — huge time saver */}
         {!showCopyPicker ? (
           <button
@@ -686,7 +640,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             </p>
           </div>
         )}
-
         {/* Existing modifier groups */}
         {modGroups.map((group) => (
           <div key={group.id} style={{
@@ -742,7 +695,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                 </div>
               </div>
             )}
-
             {/* Options list */}
             {group.options.map((opt) =>
               editingOption?.id === opt.id ? (
@@ -812,7 +764,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             </button>
           </div>
         ))}
-
         {/* Add new modifier group */}
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <input
@@ -827,7 +778,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       </div>
     );
   }
-
   // ---- NORMAL MENU LIST VIEW ----
   return (
     <div>
@@ -860,7 +810,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           + New Category
         </button>
       )}
-
       {/* EXISTING CATEGORIES WITH MANAGEMENT CONTROLS */}
       {ordered.map((cat, catIdx) => (
         <div key={cat} style={S.menuSection}>
@@ -874,7 +823,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             canMoveUp={catIdx > 0}
             canMoveDown={catIdx < ordered.length - 1}
           />
-
           {menu.filter((m) => m.category === cat).map((item) => (
             editingItem?.id === item.id ? (
               <ItemEditor
@@ -914,7 +862,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
               </div>
             )
           ))}
-
           {/* Add item to this category */}
           <button
             onClick={() => setNewItem({ item_name: "", description: "", price_cents: 0, category: cat, sort_order: menu.filter((m) => m.category === cat).length + 1, station: "bar" })}
@@ -924,7 +871,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           </button>
         </div>
       ))}
-
       {/* New item editor (for existing categories or brand-new ones) */}
       {newItem && (
         <div style={S.menuSection}>
@@ -940,14 +886,12 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     </div>
   );
 }
-
 // ============================================
 // CATEGORY HEADER — with inline rename + reorder + delete controls
 // ============================================
 function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(cat);
-
   const commit = () => {
     setEditing(false);
     const trimmed = draft.trim();
@@ -957,12 +901,10 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
       setDraft(cat);
     }
   };
-
   const cancel = () => {
     setEditing(false);
     setDraft(cat);
   };
-
   return (
     <div style={S.categoryHeaderRow}>
       {editing ? (
@@ -1022,7 +964,6 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
     </div>
   );
 }
-
 // ============================================
 // ITEM EDITOR
 // ============================================
@@ -1113,7 +1054,6 @@ function ItemEditor({ item, categories, onChange, onSave, onCancel }) {
     </div>
   );
 }
-
 // ============================================
 // VENUE SETTINGS
 // ============================================
@@ -1127,7 +1067,6 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
     accent: venue.brand_colors?.accent || "#d4a843",
     background: venue.brand_colors?.background || "#0a0a0a",
   });
-
   const handleSave = async () => {
     const { error } = await supabase
       .from("venues")
@@ -1143,7 +1082,6 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
         },
       })
       .eq("id", venue.id);
-
     if (!error) {
       setVenue((prev) => ({
         ...prev,
@@ -1156,19 +1094,16 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
       showSaved("Settings saved");
     }
   };
-
   return (
     <div style={S.settingsGrid}>
       <div style={S.settingsField}>
         <label style={S.label}>Venue Name</label>
         <input type="text" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} style={S.input} />
       </div>
-
       <div style={S.settingsField}>
         <label style={S.label}>Tagline</label>
         <input type="text" value={form.tagline} onChange={(e) => setForm({ ...form, tagline: e.target.value })} style={S.input} placeholder="e.g., Baltimore's Premium Mobile Bar" />
       </div>
-
       <div style={S.settingsRow}>
         <div style={S.settingsField}>
           <label style={S.label}>Bartender PIN</label>
@@ -1179,7 +1114,6 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
           <input type="number" step="0.5" min="0" max="30" value={form.service_fee_percent} onChange={(e) => setForm({ ...form, service_fee_percent: parseFloat(e.target.value || 0) })} style={S.input} />
         </div>
       </div>
-
       <div style={S.settingsField}>
         <label style={S.label}>Brand Colors</label>
         <div style={S.colorRow}>
@@ -1206,18 +1140,15 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
           </div>
         </div>
       </div>
-
       {/* Preview swatch */}
       <div style={{ padding: 20, borderRadius: 14, background: form.background, border: "1px solid #333", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
         <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 4, background: `linear-gradient(135deg, ${form.primary}, ${form.accent})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{form.name?.toUpperCase() || "PREVIEW"}</span>
         <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 2 }}>{form.tagline?.toUpperCase() || "YOUR TAGLINE"}</span>
       </div>
-
       <button onClick={handleSave} style={S.saveBtn}>SAVE SETTINGS</button>
     </div>
   );
 }
-
 // ============================================
 // SQUARE SETTINGS
 // ============================================
@@ -1229,7 +1160,6 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     square_environment: venue.square_environment || "sandbox",
   });
   const [showManual, setShowManual] = useState(false);
-
   // Check for OAuth callback result
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -1261,20 +1191,16 @@ function SquareSettings({ venue, setVenue, showSaved }) {
       window.history.replaceState({}, "", window.location.pathname);
     }
   }, []);
-
   const handleOAuthConnect = () => {
     const appId = "sq0idp-U-HGTJSyL66_0cvWAb1OkQ";
     const redirectUri = encodeURIComponent(`${window.location.origin}/.netlify/functions/square-oauth-callback`);
     const scope = encodeURIComponent("MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_READ ORDERS_WRITE ORDERS_READ ITEMS_READ ITEMS_WRITE");
     const state = venue.id; // Pass venue ID so callback knows which venue to update
-
     const authUrl = `https://connect.squareup.com/oauth2/authorize?client_id=${appId}&scope=${scope}&session=false&state=${state}&redirect_uri=${redirectUri}`;
     window.location.href = authUrl;
   };
-
   const handleDisconnect = async () => {
     if (!confirm("Disconnect Square? This will disable live payments and switch to demo mode.")) return;
-
     const { error } = await supabase
       .from("venues")
       .update({
@@ -1284,14 +1210,12 @@ function SquareSettings({ venue, setVenue, showSaved }) {
         square_environment: "sandbox",
       })
       .eq("id", venue.id);
-
     if (!error) {
       setForm({ square_app_id: "", square_access_token: "", square_location_id: "", square_environment: "sandbox" });
       setVenue((prev) => ({ ...prev, square_app_id: null, square_access_token: null, square_location_id: null, square_environment: "sandbox" }));
       showSaved("Square disconnected");
     }
   };
-
   const handleManualSave = async () => {
     const { error } = await supabase
       .from("venues")
@@ -1302,15 +1226,12 @@ function SquareSettings({ venue, setVenue, showSaved }) {
         square_environment: form.square_environment,
       })
       .eq("id", venue.id);
-
     if (!error) {
       setVenue((prev) => ({ ...prev, ...form }));
       showSaved("Payment settings saved");
     }
   };
-
   const isConfigured = venue.square_app_id && venue.square_access_token && venue.square_location_id;
-
   return (
     <div style={S.settingsGrid}>
       {/* Status badge */}
@@ -1319,7 +1240,6 @@ function SquareSettings({ venue, setVenue, showSaved }) {
           {isConfigured ? "✓ SQUARE CONNECTED — LIVE PAYMENTS ACTIVE" : "⚠ SQUARE NOT CONFIGURED — RUNNING IN DEMO MODE"}
         </span>
       </div>
-
       {isConfigured ? (
         /* Connected state */
         <>
@@ -1356,12 +1276,10 @@ function SquareSettings({ venue, setVenue, showSaved }) {
               YOUR CREDENTIALS STAY SECURE · PAYMENTS GO DIRECTLY TO YOUR BANK
             </p>
           </div>
-
           {/* Manual entry fallback */}
           <button onClick={() => setShowManual(!showManual)} style={{ ...S.smallBtnDim, alignSelf: "center", marginTop: 8 }}>
             {showManual ? "HIDE MANUAL SETUP" : "OR ENTER CREDENTIALS MANUALLY"}
           </button>
-
           {showManual && (
             <div style={{ padding: "20px", background: "#0a0a0a", borderRadius: 12, border: "1px solid #1a1a1a", display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={S.settingsField}>
@@ -1394,7 +1312,49 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     </div>
   );
 }
-
+// ============================================
+// EVENTS TAB — coordinates list ↔ editor
+// ============================================
+// Mirrors the pattern used by MenuBuilder: this wrapper owns the
+// "which event am I editing" state and swaps between EventsListView
+// and EventEditorView. AdminView itself doesn't need to know.
+//
+// editingEventId semantics:
+//   null   — show the list (default)
+//   "new"  — show the editor in create mode (passes eventId={null} downstream)
+//   <uuid> — show the editor in edit mode for that event
+// ============================================
+function EventsTab({ venue, BRAND }) {
+  const [editingEventId, setEditingEventId] = useState(null);
+  // Bumping this forces EventsListView to re-fetch after the editor closes,
+  // so newly-created or edited events appear without a page reload.
+  const [listRefreshKey, setListRefreshKey] = useState(0);
+  const handleCreate = () => setEditingEventId("new");
+  const handleEdit = (eventId) => setEditingEventId(eventId);
+  const handleClose = () => {
+    setEditingEventId(null);
+    setListRefreshKey((k) => k + 1);
+  };
+  if (editingEventId !== null) {
+    return (
+      <EventEditorView
+        venue={venue}
+        BRAND={BRAND}
+        eventId={editingEventId === "new" ? null : editingEventId}
+        onClose={handleClose}
+      />
+    );
+  }
+  return (
+    <EventsListView
+      key={listRefreshKey}
+      venue={venue}
+      BRAND={BRAND}
+      onCreateEvent={handleCreate}
+      onEditEvent={handleEdit}
+    />
+  );
+}
 // ============================================
 // STYLES
 // ============================================
@@ -1407,7 +1367,6 @@ const S = {
     width: 40, height: 40, borderRadius: "50%", border: "3px solid #222",
     borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite",
   },
-
   // Auth
   authCard: {
     background: "#141414", borderRadius: 20, padding: "36px 28px", maxWidth: 360, width: "100%",
@@ -1435,7 +1394,6 @@ const S = {
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer",
   },
-
   // Layout
   container: { maxWidth: 720, margin: "0 auto", padding: "0 20px 80px", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" },
   header: {
@@ -1456,7 +1414,6 @@ const S = {
     background: "transparent", border: "1px solid #333", borderRadius: 8, padding: "6px 14px",
     color: "#666", fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer",
   },
-
   // Tabs
   tabBar: { display: "flex", gap: 8, padding: "16px 0", borderBottom: "1px solid #222" },
   tab: {
@@ -1466,7 +1423,6 @@ const S = {
   },
   tabActive: { background: "#1E4D8C22", borderColor: "#1E4D8C", color: "#1E4D8C" },
   content: { padding: "20px 0" },
-
   // Menu builder
   menuSection: { marginBottom: 28 },
   menuCategoryHeader: {
@@ -1474,7 +1430,6 @@ const S = {
     color: "#d4a843", textTransform: "uppercase", marginBottom: 12, paddingBottom: 8,
     borderBottom: "1px solid #d4a8434d",
   },
-
   // NEW: Category header with management controls
   categoryHeaderRow: {
     display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8,
@@ -1499,7 +1454,6 @@ const S = {
     width: 28, height: 28, fontSize: 12, padding: 0,
     display: "flex", alignItems: "center", justifyContent: "center",
   },
-
   menuRow: {
     display: "flex", justifyContent: "space-between", alignItems: "center",
     padding: "12px 14px", background: "#1a1a1a", borderRadius: 10, border: "1px solid #222", marginBottom: 6,
@@ -1523,7 +1477,6 @@ const S = {
     background: "#d4a84308", color: "#d4a843", fontFamily: "'Oswald', sans-serif",
     fontSize: 14, fontWeight: 500, letterSpacing: 2, cursor: "pointer", marginTop: 8,
   },
-
   // Item editor
   editorCard: {
     padding: 16, background: "#141414", borderRadius: 12, border: "1px solid #1E4D8C44",
@@ -1532,10 +1485,8 @@ const S = {
   editorRow: { display: "flex", gap: 10 },
   editorField: { flex: 1, display: "flex", flexDirection: "column", gap: 4 },
   editorActions: { display: "flex", justifyContent: "flex-end", gap: 8 },
-
   // New category
   newCategoryRow: { display: "flex", gap: 10, alignItems: "center", marginTop: 12 },
-
   // Inputs
   input: {
     padding: "12px", background: "#1a1a1a", border: "1px solid #333", borderRadius: 8,
@@ -1549,12 +1500,10 @@ const S = {
   },
   label: { fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#888", letterSpacing: 1, textTransform: "uppercase" },
   error: { color: "#e74c3c", fontSize: 13, margin: 0, textAlign: "center" },
-
   // Settings
   settingsGrid: { display: "flex", flexDirection: "column", gap: 16 },
   settingsField: { display: "flex", flexDirection: "column", gap: 6 },
   settingsRow: { display: "flex", gap: 16 },
-
   // Colors
   colorRow: { display: "flex", gap: 12, flexWrap: "wrap" },
   colorField: { display: "flex", flexDirection: "column", gap: 4 },
@@ -1565,7 +1514,6 @@ const S = {
     padding: "8px", background: "#1a1a1a", border: "1px solid #333", borderRadius: 6,
     color: "#f5f5f5", fontFamily: "'Space Mono', monospace", fontSize: 12, width: 80, outline: "none",
   },
-
   // Buttons
   smallBtn: {
     padding: "8px 16px", borderRadius: 8, border: "none", background: "#1E4D8C",
@@ -1583,7 +1531,6 @@ const S = {
     color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
     letterSpacing: 3, cursor: "pointer", marginTop: 8,
   },
-
   // Preview
   previewBar: {
     position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "center",

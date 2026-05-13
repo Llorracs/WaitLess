@@ -11,10 +11,11 @@
  *
  *   1. Looks up the venue's Square credentials in Supabase
  *   2. Validates the event is published and the chosen ticket types are sellable
- *   3. Computes the buyer-paid total (face value + Square processing pass-through)
- *   4. Inserts a 'pending' row into ticket_orders
- *   5. Creates a Square-hosted checkout (CreatePaymentLink) tied to that order via reference_id
- *   6. Returns the checkout URL to the frontend, which does window.location = url
+ *   3. Validates and records buyer's T&C acceptance (REQUIRED)
+ *   4. Computes the buyer-paid total (face value + Square processing pass-through)
+ *   5. Inserts a 'pending' row into ticket_orders with terms_accepted_at + terms_version
+ *   6. Creates a Square-hosted checkout (CreatePaymentLink) tied to that order via reference_id
+ *   7. Returns the checkout URL to the frontend, which does window.location = url
  *
  * The actual conversion of pending → paid (and creation of individual tickets)
  * happens in ticket-webhook.js, triggered by Square's payment.updated event.
@@ -27,10 +28,12 @@
  *
  * REQUEST BODY:
  *   {
- *     venueSlug:  "trfq",
- *     eventSlug:  "blooms-and-booze",
- *     selections: [{ ticketTypeId: "uuid", qty: 2 }, ...],
- *     buyer:      { name: "Jane Doe", email: "j@x.com", phone: "+15555551234" }
+ *     venueSlug:        "trfq",
+ *     eventSlug:        "trfq-in-the-city",
+ *     selections:       [{ ticketTypeId: "uuid", qty: 2 }, ...],
+ *     buyer:            { name: "Jane Doe", email: "j@x.com", phone: "+15555551234" },
+ *     termsAccepted:    true,           // REQUIRED — must be exact boolean true
+ *     termsVersion:     "2026.05.12"    // REQUIRED — matches POLICY_VERSION in LegalPages
  *   }
  *
  * SUCCESS RESPONSE (200):
@@ -64,6 +67,17 @@ const supabase = createClient(
 // 2.9% + $0.30. We expose this as a constant so we can switch per-venue later.
 const SQUARE_ONLINE_RATE_BPS = 330;   // 3.30% expressed in basis points
 const SQUARE_ONLINE_FIXED_C = 30;     // 30 cents per transaction
+
+// Accepted T&C versions. Must be kept in sync with POLICY_VERSION in
+// src/LegalPages.jsx. When the policy is updated, BOTH must change in lockstep.
+// This array lets us accept a window of recent versions if needed during a
+// rollout, but for now we only accept the current one.
+//
+// SECURITY NOTE: this list is the source of truth on the server side. The
+// frontend sends what it claims is the version it displayed, but we only
+// accept it if it appears here. A buyer cannot "accept" a phantom older
+// version by tampering with the request body.
+const ACCEPTED_TERMS_VERSIONS = ["2026.05.12"];
 
 // ============================================================================
 // HELPERS
@@ -144,7 +158,7 @@ exports.handler = async (event) => {
     return err(400, "Invalid JSON body");
   }
 
-  const { venueSlug, eventSlug, selections, buyer } = body;
+  const { venueSlug, eventSlug, selections, buyer, termsAccepted, termsVersion } = body;
 
   if (!venueSlug || !eventSlug) {
     return err(400, "Missing venueSlug or eventSlug");
@@ -163,6 +177,36 @@ exports.handler = async (event) => {
   const totalQty = selections.reduce((s, x) => s + (Number(x.qty) || 0), 0);
   if (totalQty <= 0) return err(400, "Total quantity must be positive");
   if (totalQty > 50) return err(400, "Maximum 50 tickets per order");
+
+  // -------------------------------------------------------------------------
+  // 1b. Validate T&C acceptance
+  //
+  // STRICT validation. The handoff doc locked the decision: "T&C checkbox
+  // MANDATORY before pay." This block enforces that on the server, not just
+  // in the UI — a buyer cannot bypass by tampering with the request.
+  //
+  // Three requirements:
+  //   (a) termsAccepted must be the boolean literal `true` (not truthy —
+  //       a string like "yes" or a number 1 will be rejected)
+  //   (b) termsVersion must be a string
+  //   (c) termsVersion must appear in ACCEPTED_TERMS_VERSIONS (server-side
+  //       source of truth — prevents accepting phantom versions)
+  // -------------------------------------------------------------------------
+  if (termsAccepted !== true) {
+    return err(400, "You must accept the Terms of Service and Refund Policy to continue");
+  }
+  if (typeof termsVersion !== "string" || !termsVersion) {
+    return err(400, "Missing terms version");
+  }
+  if (!ACCEPTED_TERMS_VERSIONS.includes(termsVersion)) {
+    return err(400, "Terms version is outdated. Please refresh the page and try again.");
+  }
+
+  // Record the exact moment of acceptance, server-side. This is the value
+  // that will be written to ticket_orders.terms_accepted_at and is the legal
+  // record of acceptance. Using a server timestamp (not client-supplied)
+  // prevents back-dating.
+  const termsAcceptedAt = new Date().toISOString();
 
   // -------------------------------------------------------------------------
   // 2. Look up venue and validate Square config
@@ -252,6 +296,10 @@ exports.handler = async (event) => {
   // We do this BEFORE creating the Square checkout so we have a stable UUID
   // to use as Square's reference_id. The webhook later matches by reference_id
   // to find this row and flip it to 'paid'.
+  //
+  // terms_accepted_at + terms_version are written here as the legal record
+  // of T&C acceptance. terms_accepted_at uses the server timestamp captured
+  // earlier (not client-supplied) to prevent back-dating.
   // -------------------------------------------------------------------------
   const { data: order, error: orderErr } = await supabase
     .from("ticket_orders")
@@ -265,6 +313,8 @@ exports.handler = async (event) => {
       fee_cents: totals.processingCents,
       total_cents: totals.totalCents,
       status: "pending",
+      terms_accepted_at: termsAcceptedAt,
+      terms_version: termsVersion,
     })
     .select()
     .single();

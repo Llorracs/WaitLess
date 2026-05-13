@@ -45,6 +45,7 @@ import InstallPrompt from "./InstallPrompt";
 import { PrivacyPolicy, TermsOfService, RefundPolicy, VenueTerms } from "./LegalPages";
 import BuyTicketsView from "./BuyTicketsView";
 import BuyConfirmationView from "./BuyConfirmationView";
+import CheckInView from "./CheckInView";
 
 // ============================================
 // URL PARSING
@@ -60,6 +61,7 @@ function getRouteFromUrl() {
   const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
+  const isCheckin = parts[1] === "checkin"; // NEW: door scanner
 
   // NEW: ticket buy + confirmation routes
   // /{slug}/buy/{eventSlug}                   → Buy page
@@ -78,7 +80,7 @@ function getRouteFromUrl() {
 
   return {
     slug,
-    isManager, isBartender, isKitchen, isQR, isAdmin,
+    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin,
     isBuy, eventSlug, isBuyConfirmation,
     isSignup, isMasterAdmin, isOAuthComplete,
     isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
@@ -366,7 +368,7 @@ export default function App() {
   const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
   const {
     slug,
-    isManager, isBartender, isKitchen, isQR, isAdmin,
+    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin,
     isBuy, eventSlug, isBuyConfirmation,
     isSignup, isMasterAdmin, isOAuthComplete,
     isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
@@ -497,8 +499,9 @@ if (isVenueTerms) return <VenueTerms />;
       <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
       {/* Demo view switcher bar — hidden on buy/confirmation pages so buyers
-          don't see "BARTENDER MODE" buttons when they're paying for a ticket */}
-      {isDemo && !isAdmin && !isQR && !isBuy && (
+          don't see "BARTENDER MODE" buttons when they're paying for a ticket.
+          Also hidden on checkin pages so the camera UI is unobstructed. */}
+      {isDemo && !isAdmin && !isQR && !isBuy && !isCheckin && (
         <div style={{
           position: "sticky", top: 0, zIndex: 200,
           background: "#1E4D8C15", borderBottom: "1px solid #1E4D8C33",
@@ -544,6 +547,8 @@ if (isVenueTerms) return <VenueTerms />;
         <BuyConfirmationView venue={venue} BRAND={BRAND} eventSlug={eventSlug} />
       ) : isBuy ? (
         <BuyTicketsView venue={venue} BRAND={BRAND} eventSlug={eventSlug} />
+      ) : isCheckin ? (
+        <CheckInView venue={venue} BRAND={BRAND} />
       ) : isAdmin ? (
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (

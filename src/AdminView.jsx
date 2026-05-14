@@ -1071,7 +1071,6 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
     accent: venue.brand_colors?.accent || "#d4a843",
     background: venue.brand_colors?.background || "#0a0a0a",
   });
-  });
   const handleSave = async () => {
     const { error } = await supabase
       .from("venues")

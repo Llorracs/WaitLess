@@ -225,7 +225,7 @@ export default function EventEditorView({ venue, BRAND, eventId, onClose }) {
     const tt = ticketTypes.find((x) => x.id === id);
     if (!tt) return;
     if (!tt._new && (tt.quantity_sold || 0) > 0) {
-      alert("Can't remove a ticket type that has been purchased. Deactivate it instead.");
+      alert(`Can't delete a ticket type that has ${tt.quantity_sold} sale${tt.quantity_sold === 1 ? "" : "s"}. Uncheck "Active and on sale" above to stop new sales — existing tickets stay valid.`);
       return;
     }
     if (!tt._new) {
@@ -985,16 +985,28 @@ function TicketTypeCard({ tt, idx, expanded, onToggle, onChange, onRemove, price
             </label>
           </div>
 
-          {/* Remove button */}
-          <button onClick={onRemove} style={{
-            marginTop: 16, width: "100%", padding: "10px",
-            background: "transparent", border: "1px solid #e74c3c44",
-            borderRadius: 10, color: "#e74c3c",
-            fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
-            letterSpacing: 2, cursor: "pointer",
-          }}>
-            REMOVE TICKET TYPE
-          </button>
+         {/* Remove button — only show when there are no sales */}
+          {(tt._new || (tt.quantity_sold || 0) === 0) ? (
+            <button onClick={onRemove} style={{
+              marginTop: 16, width: "100%", padding: "10px",
+              background: "transparent", border: "1px solid #e74c3c44",
+              borderRadius: 10, color: "#e74c3c",
+              fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
+              letterSpacing: 2, cursor: "pointer",
+            }}>
+              REMOVE TICKET TYPE
+            </button>
+          ) : (
+            <div style={{
+              marginTop: 16, padding: "10px 14px",
+              background: "#0a0a0a", border: "1px solid #222",
+              borderRadius: 10, color: "#666",
+              fontFamily: "'Space Mono', monospace", fontSize: 10,
+              letterSpacing: 1, textAlign: "center",
+            }}>
+              CAN'T DELETE — {tt.quantity_sold} TICKET{tt.quantity_sold === 1 ? "" : "S"} SOLD. REFUND TO ENABLE.
+            </div>
+          )}
         </div>
       )}
     </div>

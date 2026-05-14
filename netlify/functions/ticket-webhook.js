@@ -1,28 +1,48 @@
 /**
  * ============================================
- * WAITLESS — Square Payment Webhook (v4 — hosted checkout fix)
+ * WAITLESS — Square Payment Webhook (v5 — per-venue signature keys)
  * Netlify Serverless Function
  * ============================================
  *
  * Path: netlify/functions/ticket-webhook.js
  *
- * CHANGE FROM v3 (HOSTED CHECKOUT REFERENCE_ID LOOKUP):
- *   Square's hosted checkout (CreatePaymentLink) does NOT propagate the
- *   reference_id from the parent Order onto the Payment object. The
- *   reference_id sits on the Order itself; the Payment carries only an
- *   order_id (Square's UUID).
+ * CHANGE FROM v4 (PER-VENUE SIGNATURE KEY LOOKUP):
+ *   v4 verified all webhook signatures using a SINGLE platform-level
+ *   env var: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY.
  *
- *   Previous v3 path failed silently with "Ignored — no reference_id"
- *   because `payment.reference_id` is null for hosted checkout payments.
+ *   That worked while TRFQ was the only Square-connected venue, because
+ *   the platform-level key happened to match TRFQ's webhook signing key.
+ *   The moment a SECOND venue connects Square with their own webhook
+ *   subscription, their events would be signed with a DIFFERENT key and
+ *   signature verification would fail — silent ticket loss.
  *
- *   v4 adds a fallback lookup chain:
- *     1. Try payment.reference_id directly (Web Payments SDK case)
- *     2. Fallback A: look up our ticket_orders row by square_order_id
- *        (we saved this in create-ticket-checkout.js)
- *     3. Fallback B: fetch the Square Order via API and read its
- *        reference_id (defense in depth for edge cases)
+ *   v5 looks up the per-venue signing key from venues.square_webhook_signature_key
+ *   BEFORE verifying the signature. The flow:
  *
- *   v3 logic (price_paid_cents capture, idempotency, etc.) unchanged below.
+ *     1. Parse raw body as JSON (no trust yet — body could be forged)
+ *     2. Extract merchant_id from the (still untrusted) body
+ *     3. DB read-only lookup: find the venue by merchant_id
+ *        → read square_webhook_signature_key from that row
+ *     4. Verify the request signature using THAT venue's key
+ *     5. If verification fails: 401, no side effects
+ *     6. From here on: payload is trusted, venue is loaded
+ *
+ *   An attacker can spoof merchant_id all day, but without the venue's
+ *   actual signing key they cannot forge a valid HMAC for the request body.
+ *   So step 4 still gates everything that mutates state.
+ *
+ *   Side effect of v5: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY is no
+ *   longer read. It can be deleted from Netlify env vars after this deploys
+ *   cleanly and a real TRFQ webhook event is verified successfully.
+ *
+ * UNCHANGED FROM v4:
+ *   - 3-step lookup chain (reference_id → square_order_id → API fallback)
+ *   - price_paid_cents capture per ticket
+ *   - Idempotency (Already processed / terminal state guards)
+ *   - Oversold detection with status='failed' flag
+ *   - quantity_sold increment per ticket type
+ *   - Email composition via Resend
+ *   - QR token generation and rendering
  * ============================================
  */
 
@@ -271,23 +291,66 @@ exports.handler = async (event) => {
 
   const notificationUrl = `${process.env.URL || "https://waitless.events"}/.netlify/functions/ticket-webhook`;
 
-  const signatureKey = process.env.SQUARE_WEBHOOK_SIGNATURE_KEY;
-  if (!signatureKey) {
-    console.error("SQUARE_WEBHOOK_SIGNATURE_KEY env var not set");
-    return { statusCode: 500, body: "Webhook not configured" };
-  }
+  // ==========================================================================
+  // CHANGE FROM v4: PER-VENUE SIGNATURE KEY LOOKUP
+  //
+  // We can't verify the signature until we know which venue this webhook is
+  // for — different venues have different signing keys. The merchant_id
+  // lives in the JSON body, but we shouldn't trust the body before we've
+  // verified it.
+  //
+  // The escape hatch: parse merchant_id ONLY, do a single read-only DB
+  // lookup, then verify the signature with THAT venue's stored signature
+  // key. If verification fails, the request is rejected before any side
+  // effect runs. An attacker spoofing merchant_id cannot forge a valid HMAC
+  // without the venue's actual signature key.
+  // ==========================================================================
 
-  if (!verifySquareSignature(rawBody, signatureHeader, signatureKey, notificationUrl)) {
-    console.warn("Invalid Square webhook signature");
-    return { statusCode: 401, body: "Invalid signature" };
-  }
-
+  // Step 1: parse JSON body — without trusting it yet
   let payload;
   try {
     payload = JSON.parse(rawBody);
   } catch {
     return { statusCode: 400, body: "Invalid JSON" };
   }
+
+  // Step 2: extract merchant_id from (still untrusted) body
+  const merchantId = payload.merchant_id || payload.merchantId;
+  if (!merchantId) {
+    console.warn("Webhook with no merchant_id");
+    return { statusCode: 200, body: "No merchant_id" };
+  }
+
+  // Step 3: read-only DB lookup — find venue by merchant_id, fetch their
+  // signature key along with everything else we'll need downstream
+  const { data: venue, error: venueErr } = await supabase
+    .from("venues")
+    .select("id, slug, name, brand_colors, square_access_token, square_environment, square_merchant_id, square_webhook_signature_key")
+    .eq("square_merchant_id", merchantId)
+    .eq("is_active", true)
+    .single();
+
+  if (venueErr || !venue) {
+    console.warn(`Webhook from unknown merchant_id: ${merchantId}`);
+    return { statusCode: 200, body: "Unknown merchant" };
+  }
+
+  // Step 4: verify signature using THIS venue's stored signature key
+  const signatureKey = venue.square_webhook_signature_key;
+  if (!signatureKey) {
+    console.error(`Venue ${venue.slug} has no square_webhook_signature_key configured`);
+    return { statusCode: 500, body: "Webhook not configured for this venue" };
+  }
+
+  if (!verifySquareSignature(rawBody, signatureHeader, signatureKey, notificationUrl)) {
+    console.warn(`Invalid Square webhook signature for venue ${venue.slug} (merchant ${merchantId})`);
+    return { statusCode: 401, body: "Invalid signature" };
+  }
+
+  // ==========================================================================
+  // From here on: payload is trusted, venue is loaded, signature verified
+  // with the correct per-venue key. v4 logic continues unchanged.
+  // ==========================================================================
 
   if (payload.type !== "payment.updated") {
     return { statusCode: 200, body: "Ignored — not a payment event" };
@@ -302,25 +365,8 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: `Ignored — payment status is ${payment.status}` };
   }
 
-  const merchantId = payload.merchant_id || payload.merchantId;
-  if (!merchantId) {
-    return { statusCode: 200, body: "No merchant_id" };
-  }
-
-  const { data: venue, error: venueErr } = await supabase
-    .from("venues")
-    .select("id, slug, name, brand_colors, square_access_token, square_environment, square_merchant_id")
-    .eq("square_merchant_id", merchantId)
-    .eq("is_active", true)
-    .single();
-
-  if (venueErr || !venue) {
-    console.warn(`Webhook from unknown merchant_id: ${merchantId}`);
-    return { statusCode: 200, body: "Unknown merchant" };
-  }
-
   // ==========================================================================
-  // CHANGE FROM v3: Find our ticket_orders row via a 3-step lookup chain.
+  // FROM v4: Find our ticket_orders row via a 3-step lookup chain.
   //
   // Square hosted checkout (CreatePaymentLink) does NOT propagate the
   // reference_id from the parent Order onto the Payment object. So
@@ -435,8 +481,8 @@ exports.handler = async (event) => {
   }
 
   // ==========================================================================
-  // CHANGE FROM v3: Use the squareOrderId we already have from the payment
-  // payload (above), falling back to order.square_order_id. v3 only checked
+  // FROM v4: Use the squareOrderId we already have from the payment payload
+  // (above), falling back to order.square_order_id. v3 only checked
   // order.square_order_id, which would fail if it never got saved.
   // ==========================================================================
   let selections = [];
@@ -487,7 +533,7 @@ exports.handler = async (event) => {
       .eq("id", sel.ticketTypeId);
   }
 
-  // Capture price_paid_cents per ticket (unchanged from v3)
+  // Capture price_paid_cents per ticket
   const ticketsToInsert = [];
   for (const sel of selections) {
     const tt = ttById.get(sel.ticketTypeId);

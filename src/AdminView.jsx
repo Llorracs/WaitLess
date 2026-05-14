@@ -1067,6 +1067,7 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
     tagline: venue.tagline || "",
     bartender_pin: venue.bartender_pin || "0000",
     service_fee_percent: venue.service_fee_percent || 5,
+    patron_font: venue.patron_font || "Inter",
     primary: venue.brand_colors?.primary || "#1E4D8C",
     accent: venue.brand_colors?.accent || "#d4a843",
     background: venue.brand_colors?.background || "#0a0a0a",
@@ -1079,6 +1080,7 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
         tagline: form.tagline,
         bartender_pin: form.bartender_pin,
         service_fee_percent: form.service_fee_percent,
+        patron_font: form.patron_font,
         brand_colors: {
           primary: form.primary,
           accent: form.accent,
@@ -1087,12 +1089,13 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
       })
       .eq("id", venue.id);
     if (!error) {
-      setVenue((prev) => ({
+     setVenue((prev) => ({
         ...prev,
         name: form.name,
         tagline: form.tagline,
         bartender_pin: form.bartender_pin,
         service_fee_percent: form.service_fee_percent,
+        patron_font: form.patron_font,
         brand_colors: { primary: form.primary, accent: form.accent, background: form.background },
       }));
       showSaved("Settings saved");
@@ -1117,6 +1120,24 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
           <label style={S.label}>Service Fee %</label>
           <input type="number" step="0.5" min="0" max="30" value={form.service_fee_percent} onChange={(e) => setForm({ ...form, service_fee_percent: parseFloat(e.target.value || 0) })} style={S.input} />
         </div>
+      </div>
+     <div style={S.settingsField}>
+        <label style={S.label}>Patron Menu Font</label>
+        <select
+          value={form.patron_font || "Inter"}
+          onChange={(e) => setForm({ ...form, patron_font: e.target.value })}
+          style={S.select}
+        >
+          <option value="Inter">Inter — Clean & universally legible (default)</option>
+          <option value="Space Grotesk">Space Grotesk — Modern with character</option>
+          <option value="Montserrat">Montserrat — Friendly geometric</option>
+          <option value="Oswald">Oswald — Bold condensed display</option>
+          <option value="Playfair Display">Playfair Display — Elegant serif</option>
+          <option value="Bebas Neue">Bebas Neue — All-caps display</option>
+        </select>
+        <p style={{ fontSize: 11, color: "#666", margin: "6px 0 0", lineHeight: 1.5 }}>
+          Used for your venue name + section headers on patron-facing pages (menu, ticket buy, confirmation). Item names and prices stay readable regardless of choice.
+        </p>
       </div>
       <div style={S.settingsField}>
         <label style={S.label}>Brand Colors</label>

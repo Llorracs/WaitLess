@@ -23,7 +23,7 @@
  *
  * Props:
  *   - venue:     the current venue object (from App.jsx)
- *   - BRAND:     theming object (from App.jsx) — uses venue colors
+ *   - BRAND:     theming object (from App.jsx) — uses venue colors + patronFont
  *   - eventSlug: the event slug from the URL
  *
  * State machine:
@@ -51,6 +51,14 @@
  *   the SAME QR codes client-side from the same qr_token string, using the
  *   `qrcode` npm package (already in package.json — used by the webhook).
  *   Same data string → same QR → same scan behavior at the door.
+ *
+ * PATRON FONT (Piece 12 Chunk 3):
+ * All patron-facing expressive headers use BRAND.patronFont:
+ *   - "YOU'RE IN" celebration H1
+ *   - Event name H2 in header card
+ *   - "Your Tickets" / "Order Summary" section headers
+ *   - All StatusScreen/PollingScreen/RefundedScreen H1s
+ * Tier names, ticket index labels, button labels, prices stay Oswald/Space Mono.
  * ============================================
  */
 
@@ -458,8 +466,9 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
           </span>
         </div>
 
+        {/* "YOU'RE IN" celebration — uses BRAND.patronFont (Piece 12-3) */}
         <h1 style={{
-          fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700,
+          fontFamily: BRAND.patronFont, fontSize: 32, fontWeight: 700,
           letterSpacing: 3, margin: "0 0 12px", lineHeight: 1.1,
           background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
@@ -488,8 +497,9 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
           }}>
             {venue.name}
           </div>
+          {/* Event name — uses BRAND.patronFont (Piece 12-3) */}
           <h2 style={{
-            fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700,
+            fontFamily: BRAND.patronFont, fontSize: 22, fontWeight: 700,
             letterSpacing: 1, margin: "0 0 12px", color: BRAND.white,
             lineHeight: 1.2,
           }}>
@@ -540,8 +550,9 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
 
       {/* Tickets section */}
       <div style={{ marginBottom: 28 }}>
+        {/* "Your Tickets" section header — uses BRAND.patronFont (Piece 12-3) */}
         <h3 style={{
-          fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
+          fontFamily: BRAND.patronFont, fontSize: 13, fontWeight: 600,
           letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase",
           marginBottom: 6, paddingBottom: 8,
           borderBottom: `1px solid ${BRAND.accentMuted}`,
@@ -587,8 +598,9 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
           padding: "18px 20px", background: BRAND.cardBg,
           borderRadius: 12, border: "1px solid #222",
         }}>
+          {/* "Order Summary" section header — uses BRAND.patronFont (Piece 12-3) */}
           <h3 style={{
-            fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
+            fontFamily: BRAND.patronFont, fontSize: 11, fontWeight: 600,
             letterSpacing: 3, color: BRAND.gray, textTransform: "uppercase",
             margin: "0 0 12px",
           }}>
@@ -633,6 +645,9 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
  * Renders one ticket card. The QR code is generated client-side from the
  * same qr_token string that the webhook used server-side for email — they're
  * deterministically identical, so scanning either works.
+ *
+ * Tier name + "Ticket X of Y" stay Oswald — those are utility labels
+ * (repeated, scannable), not expressive headers.
  */
 function TicketCard({ ticket, ticketType, index, total, BRAND }) {
   const [qrDataUrl, setQrDataUrl] = useState(null);
@@ -782,6 +797,7 @@ function TicketCard({ ticket, ticketType, index, total, BRAND }) {
 
 /**
  * Generic centered status screen — used for not_found, error, failed, timeout.
+ * Title uses BRAND.patronFont (Piece 12-3) so failure screens match venue brand.
  */
 function StatusScreen({ BRAND, icon, title, titleColor, body }) {
   return (
@@ -805,7 +821,7 @@ function StatusScreen({ BRAND, icon, title, titleColor, body }) {
       )}
 
       <h1 style={{
-        fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700,
+        fontFamily: BRAND.patronFont, fontSize: 22, fontWeight: 700,
         letterSpacing: 4, margin: 0,
         color: titleColor || undefined,
         background: titleColor ? undefined : `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
@@ -830,6 +846,7 @@ function StatusScreen({ BRAND, icon, title, titleColor, body }) {
 /**
  * Polling screen — shown while we wait for the webhook to flip the order to 'paid'.
  * Encouraging tone, not alarming. Includes a subtle indicator of poll progress.
+ * Title uses BRAND.patronFont (Piece 12-3).
  */
 function PollingScreen({ BRAND, attempts }) {
   const percentage = Math.min(100, (attempts / MAX_POLL_ATTEMPTS) * 100);
@@ -848,7 +865,7 @@ function PollingScreen({ BRAND, attempts }) {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
       <h1 style={{
-        fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700,
+        fontFamily: BRAND.patronFont, fontSize: 22, fontWeight: 700,
         letterSpacing: 3, margin: 0,
         background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
         WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
@@ -889,6 +906,7 @@ function PollingScreen({ BRAND, attempts }) {
 /**
  * Refunded screen — shown when the visitor returns to the URL after their
  * order was refunded.
+ * Title uses BRAND.patronFont (Piece 12-3).
  */
 function RefundedScreen({ BRAND, order, event }) {
   return (
@@ -899,7 +917,7 @@ function RefundedScreen({ BRAND, order, event }) {
       <div style={{ fontSize: 48, marginBottom: 16 }}>💸</div>
 
       <h1 style={{
-        fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700,
+        fontFamily: BRAND.patronFont, fontSize: 22, fontWeight: 700,
         letterSpacing: 4, margin: "0 0 16px", color: BRAND.white,
       }}>
         ORDER REFUNDED

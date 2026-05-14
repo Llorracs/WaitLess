@@ -23,34 +23,16 @@
  *
  * Props:
  *   - venue:    the current venue object (from App.jsx)
- *   - BRAND:    theming object (from App.jsx) — uses venue colors
+ *   - BRAND:    theming object (from App.jsx) — uses venue colors + patronFont
  *   - eventSlug: the event slug from the URL
  *
- * State machine:
- *   loading → ready(select) → ready(checkout) → submitting → redirect
- *                  ↑              |
- *                  └──────────────┘  (Edit Tickets button)
- *
- *   Or any stage → error (with retry to ready/select)
- *
- * Edge cases handled:
- *   - Event not found → 404 state
- *   - Event status = draft → "not on sale yet" (unless ?preview=1 in URL)
- *   - Event status = canceled → "canceled" state
- *   - Event ended (ends_at in past) → "event has ended" state
- *   - All tiers sold out → "sold out" hero, no picker
- *   - Specific tier sold out → disabled, "SOLD OUT" badge, qty stays at 0
- *   - Sale not yet started → disabled, "ON SALE [date]" badge
- *   - Sale ended → disabled, "SALES ENDED" badge
- *   - Inactive tier → hidden entirely from buy page
- *   - Server-side capacity race → checkout endpoint returns 409 with remaining;
- *                                  we display the error inline and let buyer adjust
- *
- * Pricing display:
- *   The processing pass-through (Square's 3.3% + $0.30 per transaction) is
- *   computed client-side for display only. The Netlify function recomputes
- *   authoritatively before charging Square. Buyer sees a transparent
- *   breakdown so they know exactly what they're paying for.
+ * PATRON FONT (Piece 12 Chunk 3):
+ * All patron-facing expressive headers use BRAND.patronFont:
+ *   - Event name H1 hero
+ *   - SectionHeader ("Select Tickets", "Your Details", "Order Summary")
+ *   - Status/error headlines via headlineStyle ("EVENT NOT FOUND", etc.)
+ * Tier names, button labels, prices, and form labels stay Oswald/Space Mono —
+ * those are utility, not brand expression.
  * ============================================
  */
 
@@ -463,7 +445,7 @@ export default function BuyTicketsView({ venue, BRAND, eventSlug }) {
   if (event.status === "canceled") {
     return (
       <CenteredMessage BRAND={BRAND}>
-        <h1 style={{ ...headlineStyle(BRAND), color: "#e74c3c" }}>EVENT CANCELED</h1>
+        <h1 style={{ ...headlineStyle(BRAND), color: "#e74c3c", background: "none", WebkitBackgroundClip: "unset", WebkitTextFillColor: "#e74c3c" }}>EVENT CANCELED</h1>
         <p style={{ color: BRAND.gray, maxWidth: 400, textAlign: "center", lineHeight: 1.6 }}>
           {event.name} has been canceled. If you purchased a ticket, the venue
           will be in touch about refunds.
@@ -529,8 +511,9 @@ export default function BuyTicketsView({ venue, BRAND, eventSlug }) {
           {venue.name}
         </div>
 
+        {/* Event name — uses BRAND.patronFont (Piece 12-3) */}
         <h1 style={{
-          fontFamily: "'Oswald', sans-serif", fontSize: 32, fontWeight: 700,
+          fontFamily: BRAND.patronFont, fontSize: 32, fontWeight: 700,
           letterSpacing: 2, margin: "0 0 16px", lineHeight: 1.1,
           background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
@@ -878,10 +861,12 @@ function CenteredMessage({ children, BRAND }) {
   );
 }
 
+// SectionHeader — uses BRAND.patronFont (Piece 12-3)
+// Renders "Select Tickets", "Your Details", "Order Summary"
 function SectionHeader({ children, BRAND }) {
   return (
     <h2 style={{
-      fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
+      fontFamily: BRAND.patronFont, fontSize: 13, fontWeight: 600,
       letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase",
       marginBottom: 12, paddingBottom: 8,
       borderBottom: `1px solid ${BRAND.accentMuted}`,
@@ -936,6 +921,8 @@ function EmptyState({ children, BRAND, accent }) {
   );
 }
 
+// TierCard — tier name (tt.name) stays Oswald (Piece 12-3 decision)
+// Repeated/scannable label, not expressive header
 function TierCard({ tt, evalResult, qty, onDecrement, onIncrement, cartTotalQty, disabled, BRAND }) {
   const sellable = evalResult.sellable;
   const totalReached = cartTotalQty >= MAX_TICKETS_PER_ORDER;
@@ -1118,9 +1105,12 @@ function inputStyle(BRAND, hasError) {
   };
 }
 
+// headlineStyle — used by all status/error headlines on this page
+// (EVENT NOT FOUND, SOMETHING WENT WRONG, NOT ON SALE YET, EVENT HAS ENDED)
+// Uses BRAND.patronFont (Piece 12-3) so failure states match venue brand
 function headlineStyle(BRAND) {
   return {
-    fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700,
+    fontFamily: BRAND.patronFont, fontSize: 24, fontWeight: 700,
     letterSpacing: 4, margin: 0, textAlign: "center",
     background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
     WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",

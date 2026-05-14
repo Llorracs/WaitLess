@@ -15,6 +15,27 @@
  * - Rename, delete, reorder menu CATEGORIES
  * - Enter Square credentials
  * - Manage ticketed events
+ *
+ * WHITE-LABEL POLICY (Phase 1, May 14 2026):
+ * "Shopify model" — auth screen stays Waitless-branded (logo, LOG IN button,
+ * tab pills, spinner). Once logged in, the dashboard adopts the venue's
+ * primary + accent colors throughout. Background canvas stays Waitless dark
+ * (#0a0a0a). Status colors (green/red/yellow) and card backgrounds unchanged.
+ * 
+ * Pre-login Waitless touchpoints (DO NOT venue-theme):
+ * - S.authLogo gradient
+ * - S.authButton gradient
+ * - S.authTabActive blue
+ * - S.spinner topColor
+ * 
+ * Post-login venue-themed elements (read from BRAND.primary / BRAND.accent):
+ * - Header title gradient
+ * - Active tab pill (border + background tint + text color)
+ * - "SAVE SETTINGS" + other primary action button gradients
+ * - "CONNECT SQUARE ACCOUNT" gradient
+ * - Category headers (color + border)
+ * - Menu item price color
+ * - Various accent highlights
  * ============================================
  */
 import { useState, useEffect } from "react";
@@ -25,6 +46,92 @@ import BillingView from "./BillingView";
 import EventsListView from "./EventsListView";
 import EventEditorView from "./EventEditorView";
 import TicketOrdersView from "./TicketOrdersView";
+
+// ============================================
+// VENUE-THEMED STYLE BUILDERS
+// ============================================
+// Style objects that depend on BRAND (the venue's color scheme).
+// Built per-render because BRAND comes from props, not module scope.
+// Naming convention: `vs` prefix (venue styles) so they don't shadow `S`.
+function buildVenueStyles(BRAND) {
+  const primary = BRAND.primary;
+  const accent = BRAND.accent;
+  return {
+    headerTitle: {
+      fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, letterSpacing: 4, margin: 0,
+      background: `linear-gradient(135deg, ${primary}, ${accent})`,
+      WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+    },
+    tabActive: {
+      background: `${primary}22`,
+      borderColor: primary,
+      color: primary,
+    },
+    saveBtn: {
+      padding: "16px", borderRadius: 10, border: "none",
+      background: `linear-gradient(135deg, ${primary}, ${accent})`,
+      color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
+      letterSpacing: 3, cursor: "pointer", marginTop: 8,
+    },
+    smallBtn: {
+      padding: "8px 16px", borderRadius: 8, border: "none",
+      background: primary,
+      color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
+      letterSpacing: 2, cursor: "pointer",
+    },
+    categoryHeaderText: {
+      flex: 1, margin: 0, fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
+      letterSpacing: 4,
+      color: accent,
+      textTransform: "uppercase", cursor: "pointer",
+    },
+    categoryHeaderRow: {
+      display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8,
+      borderBottom: `1px solid ${accent}4d`,
+    },
+    categoryHeaderInput: {
+      flex: 1, padding: "6px 10px", background: "#141414",
+      border: `1px solid ${accent}`,
+      borderRadius: 6, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 13,
+      letterSpacing: 4, textTransform: "uppercase", outline: "none",
+    },
+    menuItemPrice: {
+      fontFamily: "'Space Mono', monospace", fontSize: 14,
+      color: accent,
+    },
+    addCategoryBtn: {
+      padding: "12px 20px", borderRadius: 10,
+      border: `1px dashed ${accent}66`,
+      background: `${accent}08`,
+      color: accent,
+      fontFamily: "'Oswald', sans-serif",
+      fontSize: 14, fontWeight: 500, letterSpacing: 2, cursor: "pointer", marginTop: 8,
+    },
+    previewLink: {
+      fontFamily: "'Space Mono', monospace", fontSize: 11,
+      color: accent,
+      letterSpacing: 1, textDecoration: "none",
+    },
+    editorCard: {
+      padding: 16, background: "#141414", borderRadius: 12,
+      border: `1px solid ${primary}44`,
+      display: "flex", flexDirection: "column", gap: 10, marginBottom: 8,
+    },
+    moveBtnEnabled: (enabled) => ({
+      background: "transparent",
+      border: `1px solid ${enabled ? accent : "#333"}`,
+      borderRadius: 6,
+      width: 28, height: 28, fontSize: 12, padding: 0,
+      display: "flex", alignItems: "center", justifyContent: "center",
+      color: enabled ? accent : "#333",
+      cursor: enabled ? "pointer" : "not-allowed",
+    }),
+    categoryHeaderTextColor: accent,
+    primaryColor: primary,
+    accentColor: accent,
+  };
+}
+
 export default function AdminView({ venue: initialVenue, BRAND }) {
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState("login"); // login | signup
@@ -37,6 +144,10 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
   const [activeTab, setActiveTab] = useState("analytics"); // analytics | menu | events | settings | square | qr | billing
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState(null);
+
+  // Venue-themed styles (recomputed when BRAND changes — cheap)
+  const vs = buildVenueStyles(BRAND);
+
   // Check for existing session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -106,7 +217,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
     setSaveMessage(msg);
     setTimeout(() => setSaveMessage(null), 2000);
   };
-  // ---- AUTH SCREEN ----
+  // ---- AUTH SCREEN ---- (stays Waitless-branded per Shopify model)
   if (authLoading) {
     return (
       <div style={S.centered}>
@@ -151,13 +262,13 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
       </div>
     );
   }
-  // ---- ADMIN DASHBOARD ----
+  // ---- ADMIN DASHBOARD ---- (venue-themed post-login)
   return (
     <div style={S.container}>
-      {/* Header */}
+      {/* Header — venue colors */}
       <div style={S.header}>
         <div>
-          <h1 style={S.headerTitle}>{venue.name?.toUpperCase()}</h1>
+          <h1 style={vs.headerTitle}>{venue.name?.toUpperCase()}</h1>
           <p style={S.headerSub}>Admin Dashboard</p>
         </div>
         <div style={S.headerRight}>
@@ -165,7 +276,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <button onClick={handleLogout} style={S.logoutBtn}>LOG OUT</button>
         </div>
       </div>
-      {/* Tab nav */}
+      {/* Tab nav — active pill uses venue colors */}
       <div style={S.tabBar}>
         {[
           { key: "analytics", label: "Analytics" },
@@ -180,7 +291,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            style={{ ...S.tab, ...(activeTab === tab.key ? S.tabActive : {}) }}
+            style={{ ...S.tab, ...(activeTab === tab.key ? vs.tabActive : {}) }}
           >
             {tab.label}
           </button>
@@ -192,18 +303,18 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <AnalyticsView venue={venue} BRAND={BRAND} />
         )}
         {activeTab === "menu" && (
-          <MenuBuilder venue={venue} setVenue={setVenue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} />
+          <MenuBuilder venue={venue} setVenue={setVenue} menu={menu} setMenu={setMenu} onSave={loadMenu} showSaved={showSaved} BRAND={BRAND} vs={vs} />
         )}
         {activeTab === "events" && (
           <EventsTab venue={venue} BRAND={BRAND} />
         )}
         {activeTab === "settings" && (
-          <VenueSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
+          <VenueSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} vs={vs} />
         )}
         {activeTab === "ticket_orders" && (<TicketOrdersView venue={venue} BRAND={BRAND} />)}
-        
+
         {activeTab === "square" && (
-          <SquareSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} />
+          <SquareSettings venue={venue} setVenue={setVenue} showSaved={showSaved} BRAND={BRAND} vs={vs} />
         )}
         {activeTab === "qr" && (
           <QRGenerator venue={venue} BRAND={BRAND} embedded={true} />
@@ -212,12 +323,12 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
           <BillingView venue={venue} BRAND={BRAND} />
         )}
       </div>
-      {/* Preview link */}
+      {/* Preview link — accent color */}
       <div style={S.previewBar}>
-        <a href={`/${venue.slug}`} target="_blank" rel="noopener noreferrer" style={S.previewLink}>
+        <a href={`/${venue.slug}`} target="_blank" rel="noopener noreferrer" style={vs.previewLink}>
           👁 Preview Patron View
         </a>
-        <a href={`/${venue.slug}/bartender`} target="_blank" rel="noopener noreferrer" style={S.previewLink}>
+        <a href={`/${venue.slug}/bartender`} target="_blank" rel="noopener noreferrer" style={vs.previewLink}>
           👁 Preview Bartender View
         </a>
       </div>
@@ -227,7 +338,7 @@ export default function AdminView({ venue: initialVenue, BRAND }) {
 // ============================================
 // MENU BUILDER
 // ============================================
-function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND }) {
+function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND, vs }) {
   const [editingItem, setEditingItem] = useState(null);
   const [newItem, setNewItem] = useState(null);
   const [newCategory, setNewCategory] = useState("");
@@ -243,13 +354,9 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   // ============================
   // CATEGORY ORDERING
   // ============================
-  // Returns categories in the venue's saved display order.
-  // Includes saved empty categories (so newly-created empty ones show up),
-  // and appends any categories present in the menu but not yet saved.
   const orderedCategories = () => {
     const saved = Array.isArray(venue?.category_order) ? venue.category_order : [];
     const present = Array.from(new Set(menu.map((m) => m.category)));
-    // Keep ALL saved categories (even empty ones), then append items-with-unknown-category
     const extras = present.filter((c) => !saved.includes(c)).sort();
     return [...saved, ...extras];
   };
@@ -278,19 +385,16 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   const renameCategory = async (oldName, newName) => {
     const trimmed = (newName || "").trim();
     if (!trimmed || trimmed === oldName) return;
-    // Check for collision — if new name already exists, items would merge (which is fine, but warn)
     const exists = menu.some((m) => m.category === trimmed);
     if (exists) {
       if (!confirm(`Category "${trimmed}" already exists. Merge "${oldName}" into it?`)) return;
     }
-    // Update every menu item in that category
     const { error } = await supabase
       .from("menus")
       .update({ category: trimmed })
       .eq("venue_id", venue.id)
       .eq("category", oldName);
     if (error) { showSaved("Rename failed"); return; }
-    // Update saved order array — swap the name, de-duplicate if merging
     const current = orderedCategories();
     const updatedOrder = Array.from(new Set(current.map((c) => (c === oldName ? trimmed : c))));
     await persistCategoryOrder(updatedOrder);
@@ -303,7 +407,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       ? `Delete "${cat}" and all ${itemsInCat.length} item${itemsInCat.length === 1 ? "" : "s"} inside it? This cannot be undone.`
       : `Delete empty category "${cat}"?`;
     if (!confirm(confirmText)) return;
-    // Delete all items in the category (if any)
     if (itemsInCat.length > 0) {
       const { error } = await supabase
         .from("menus")
@@ -312,19 +415,15 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         .eq("category", cat);
       if (error) { showSaved("Delete failed"); return; }
     }
-    // Remove from saved order
     const current = orderedCategories().filter((c) => c !== cat);
     await persistCategoryOrder(current);
     await onSave();
     showSaved(`Removed "${cat}"`);
   };
-  // Create a new empty category — adds it to the venue's category_order array
-  // so it appears in the admin UI even before any items exist.
   const handleCreateEmptyCategory = async () => {
     const trimmed = newCategory.trim();
     if (!trimmed) return;
     const current = orderedCategories();
-    // Prevent duplicates
     if (current.some((c) => c.toLowerCase() === trimmed.toLowerCase())) {
       showSaved("Category already exists");
       setShowNewCategory(false);
@@ -338,11 +437,10 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     showSaved(`Created "${trimmed}"`);
   };
   // ============================
-  // ITEM HANDLERS (unchanged)
+  // ITEM HANDLERS
   // ============================
   const handleSaveItem = async (item) => {
     if (item.id) {
-      // Update existing
       const { error } = await supabase
         .from("menus")
         .update({
@@ -357,7 +455,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         .eq("id", item.id);
       if (!error) { await onSave(); showSaved("Item updated"); }
     } else {
-      // Insert new
       const { error } = await supabase
         .from("menus")
         .insert({
@@ -486,10 +583,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     if (error) { showSaved("Delete failed"); return; }
     await loadModifiers(modifierItemId);
   };
-  // Copy all modifier groups + options from a source item to the current item
-  // Using "add" semantics: existing groups are preserved, copied groups are appended
   const copyModifiersFromItem = async (sourceItemId) => {
-    // 1. Fetch all groups from source
     const { data: sourceGroups, error: gErr } = await supabase
       .from("menu_modifiers")
       .select("*")
@@ -500,7 +594,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       setShowCopyPicker(false);
       return;
     }
-    // 2. Fetch all options for those groups
     const sourceGroupIds = sourceGroups.map((g) => g.id);
     const { data: sourceOptions, error: oErr } = await supabase
       .from("modifier_options")
@@ -508,9 +601,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
       .in("modifier_id", sourceGroupIds)
       .order("sort_order");
     if (oErr) { showSaved("Copy failed"); return; }
-    // 3. Determine starting sort_order to append after any existing groups
     const baseSort = modGroups.length;
-    // 4. Insert duplicated groups, one at a time so we can map old IDs → new IDs
     for (let i = 0; i < sourceGroups.length; i++) {
       const g = sourceGroups[i];
       const { data: newGroupRows, error: insGErr } = await supabase
@@ -530,7 +621,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         return;
       }
       const newGroup = newGroupRows[0];
-      // 5. For each option of that source group, insert a copy pointing at the new group
       const optionsForGroup = (sourceOptions || []).filter((o) => o.modifier_id === g.id);
       if (optionsForGroup.length > 0) {
         const newOptions = optionsForGroup.map((o) => ({
@@ -557,8 +647,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   };
   const ordered = orderedCategories();
   const modifierItem = menu.find((m) => m.id === modifierItemId);
-  // Items that have modifier groups (useful sources for the copy picker)
-  // Note: we derive this lazily when the copy picker opens, since it needs a DB roundtrip
   const [copyCandidates, setCopyCandidates] = useState([]);
   useEffect(() => {
     if (!showCopyPicker || !venue?.id) return;
@@ -568,7 +656,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         .select("menu_item_id");
       if (!data) { setCopyCandidates([]); return; }
       const itemIdsWithMods = new Set(data.map((d) => d.menu_item_id));
-      // Exclude the current item (copying from yourself is useless)
       const candidates = menu.filter(
         (m) => itemIdsWithMods.has(m.id) && m.id !== modifierItemId
       );
@@ -577,7 +664,6 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
     loadCandidates();
   }, [showCopyPicker, modifierItemId, venue?.id, menu]);
   // ---- MODIFIER EDITOR VIEW ----
-  // When modifierItemId is set, show the modifier editor instead of the menu list
   if (modifierItemId && modifierItem) {
     return (
       <div>
@@ -590,13 +676,15 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
         <p style={{ fontSize: 12, color: "#888", marginBottom: 16 }}>
           Customization options patrons can pick when ordering this item (e.g., Size, Mixer, Ice).
         </p>
-        {/* Copy from another item — huge time saver */}
+        {/* Copy from another item — uses primary venue color */}
         {!showCopyPicker ? (
           <button
             onClick={() => setShowCopyPicker(true)}
             style={{
-              padding: "10px 16px", borderRadius: 8, border: "1px dashed #1E4D8C66",
-              background: "#1E4D8C11", color: "#1E4D8C",
+              padding: "10px 16px", borderRadius: 8,
+              border: `1px dashed ${BRAND.primary}66`,
+              background: `${BRAND.primary}11`,
+              color: BRAND.primary,
               fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
               letterSpacing: 2, cursor: "pointer", width: "100%", marginBottom: 16,
             }}
@@ -605,11 +693,12 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           </button>
         ) : (
           <div style={{
-            padding: 14, background: "#0a0a0a", border: "1px solid #1E4D8C44",
+            padding: 14, background: "#0a0a0a",
+            border: `1px solid ${BRAND.primary}44`,
             borderRadius: 10, marginBottom: 16, display: "flex", flexDirection: "column", gap: 8,
           }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 2, color: "#1E4D8C" }}>
+              <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, letterSpacing: 2, color: BRAND.primary }}>
                 COPY FROM WHICH ITEM?
               </span>
               <button onClick={() => setShowCopyPicker(false)} style={S.smallBtnDim}>CANCEL</button>
@@ -680,13 +769,13 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                 </div>
                 <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                   <button onClick={() => setEditingGroup(null)} style={S.smallBtnDim}>CANCEL</button>
-                  <button onClick={() => updateModGroup(editingGroup)} style={S.smallBtn}>SAVE</button>
+                  <button onClick={() => updateModGroup(editingGroup)} style={vs.smallBtn}>SAVE</button>
                 </div>
               </div>
             ) : (
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
                 <div>
-                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: "#d4a843" }}>
+                  <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: BRAND.accent }}>
                     {group.group_name}
                   </span>
                   <span style={{ fontSize: 10, color: "#666", marginLeft: 8, fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>
@@ -724,7 +813,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                     />
                     Default
                   </label>
-                  <button onClick={() => updateOption(editingOption)} style={{ ...S.smallBtn, padding: "6px 12px", fontSize: 11 }}>OK</button>
+                  <button onClick={() => updateOption(editingOption)} style={{ ...vs.smallBtn, padding: "6px 12px", fontSize: 11 }}>OK</button>
                   <button onClick={() => setEditingOption(null)} style={{ ...S.smallBtnDim, padding: "6px 12px", fontSize: 11 }}>×</button>
                 </div>
               ) : (
@@ -736,7 +825,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                   {opt.price_cents !== 0 && (
                     <span style={{
                       fontSize: 11,
-                      color: opt.price_cents > 0 ? "#d4a843" : "#2ecc71",
+                      color: opt.price_cents > 0 ? BRAND.accent : "#2ecc71",
                       fontFamily: "'Space Mono', monospace",
                     }}>
                       {opt.price_cents > 0 ? "+" : ""}${(opt.price_cents / 100).toFixed(2)}
@@ -744,9 +833,9 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                   )}
                   {opt.is_default && (
                     <span style={{
-                      fontSize: 8, color: "#1E4D8C",
+                      fontSize: 8, color: BRAND.primary,
                       fontFamily: "'Space Mono', monospace", letterSpacing: 1,
-                      padding: "1px 6px", background: "#1E4D8C22", borderRadius: 4,
+                      padding: "1px 6px", background: `${BRAND.primary}22`, borderRadius: 4,
                     }}>
                       DEFAULT
                     </span>
@@ -777,7 +866,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             onKeyDown={(e) => e.key === "Enter" && addModGroup()}
             style={{ ...S.input, flex: 1 }}
           />
-          <button onClick={addModGroup} style={S.smallBtn}>ADD GROUP</button>
+          <button onClick={addModGroup} style={vs.smallBtn}>ADD GROUP</button>
         </div>
       </div>
     );
@@ -785,7 +874,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   // ---- NORMAL MENU LIST VIEW ----
   return (
     <div>
-      {/* NEW CATEGORY BUTTON — MOVED TO TOP */}
+      {/* NEW CATEGORY BUTTON */}
       {showNewCategory ? (
         <div style={{ ...S.newCategoryRow, marginTop: 0, marginBottom: 24 }}>
           <input
@@ -803,14 +892,14 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           />
           <button
             onClick={handleCreateEmptyCategory}
-            style={S.smallBtn}
+            style={vs.smallBtn}
           >
             CREATE
           </button>
           <button onClick={() => { setShowNewCategory(false); setNewCategory(""); }} style={S.smallBtnDim}>CANCEL</button>
         </div>
       ) : (
-        <button onClick={() => setShowNewCategory(true)} style={{ ...S.addCategoryBtn, marginTop: 0, marginBottom: 24, width: "100%" }}>
+        <button onClick={() => setShowNewCategory(true)} style={{ ...vs.addCategoryBtn, marginTop: 0, marginBottom: 24, width: "100%" }}>
           + New Category
         </button>
       )}
@@ -826,6 +915,8 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             onMoveDown={() => moveCategory(cat, "down")}
             canMoveUp={catIdx > 0}
             canMoveDown={catIdx < ordered.length - 1}
+            vs={vs}
+            BRAND={BRAND}
           />
           {menu.filter((m) => m.category === cat).map((item) => (
             editingItem?.id === item.id ? (
@@ -836,6 +927,8 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                 onChange={setEditingItem}
                 onSave={() => handleSaveItem(editingItem)}
                 onCancel={() => setEditingItem(null)}
+                vs={vs}
+                BRAND={BRAND}
               />
             ) : (
               <div key={item.id} style={{ ...S.menuRow, opacity: item.active ? 1 : 0.5 }}>
@@ -844,13 +937,15 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
                   {item.description && <span style={S.menuItemDesc}>{item.description}</span>}
                 </div>
                 <div style={S.menuRowRight}>
-                  <span style={S.menuItemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
+                  <span style={vs.menuItemPrice}>${(item.price_cents / 100).toFixed(2)}</span>
                   <button
                     onClick={() => openModifiers(item.id)}
                     style={{
-                      background: "transparent", border: "1px solid #d4a84333",
+                      background: "transparent",
+                      border: `1px solid ${BRAND.accent}33`,
                       borderRadius: 4, padding: "3px 8px",
-                      color: "#d4a843", fontFamily: "'Space Mono', monospace",
+                      color: BRAND.accent,
+                      fontFamily: "'Space Mono', monospace",
                       fontSize: 9, letterSpacing: 1, cursor: "pointer",
                     }}
                     title="Edit modifiers for this item"
@@ -875,7 +970,7 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
           </button>
         </div>
       ))}
-      {/* New item editor (for existing categories or brand-new ones) */}
+      {/* New item editor */}
       {newItem && (
         <div style={S.menuSection}>
           <ItemEditor
@@ -884,6 +979,8 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
             onChange={setNewItem}
             onSave={() => handleSaveItem(newItem)}
             onCancel={() => setNewItem(null)}
+            vs={vs}
+            BRAND={BRAND}
           />
         </div>
       )}
@@ -891,9 +988,9 @@ function MenuBuilder({ venue, setVenue, menu, setMenu, onSave, showSaved, BRAND 
   );
 }
 // ============================================
-// CATEGORY HEADER — with inline rename + reorder + delete controls
+// CATEGORY HEADER
 // ============================================
-function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDown, canMoveUp, canMoveDown }) {
+function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDown, canMoveUp, canMoveDown, vs, BRAND }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(cat);
   const commit = () => {
@@ -910,7 +1007,7 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
     setDraft(cat);
   };
   return (
-    <div style={S.categoryHeaderRow}>
+    <div style={vs.categoryHeaderRow}>
       {editing ? (
         <input
           type="text"
@@ -922,11 +1019,11 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
             if (e.key === "Escape") cancel();
           }}
           autoFocus
-          style={S.categoryHeaderInput}
+          style={vs.categoryHeaderInput}
         />
       ) : (
         <h3
-          style={S.categoryHeaderText}
+          style={vs.categoryHeaderText}
           onClick={() => setEditing(true)}
           title="Click to rename"
         >
@@ -937,7 +1034,7 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
         <button
           onClick={onMoveUp}
           disabled={!canMoveUp}
-          style={{ ...S.categoryCtrlBtn, color: canMoveUp ? "#d4a843" : "#333", cursor: canMoveUp ? "pointer" : "not-allowed" }}
+          style={vs.moveBtnEnabled(canMoveUp)}
           title="Move category up"
         >
           ↑
@@ -945,7 +1042,7 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
         <button
           onClick={onMoveDown}
           disabled={!canMoveDown}
-          style={{ ...S.categoryCtrlBtn, color: canMoveDown ? "#d4a843" : "#333", cursor: canMoveDown ? "pointer" : "not-allowed" }}
+          style={vs.moveBtnEnabled(canMoveDown)}
           title="Move category down"
         >
           ↓
@@ -971,9 +1068,9 @@ function CategoryHeader({ cat, itemCount, onRename, onDelete, onMoveUp, onMoveDo
 // ============================================
 // ITEM EDITOR
 // ============================================
-function ItemEditor({ item, categories, onChange, onSave, onCancel }) {
+function ItemEditor({ item, categories, onChange, onSave, onCancel, vs, BRAND }) {
   return (
-    <div style={S.editorCard}>
+    <div style={vs.editorCard}>
       <input
         type="text"
         placeholder="Item name"
@@ -1053,7 +1150,7 @@ function ItemEditor({ item, categories, onChange, onSave, onCancel }) {
       </div>
       <div style={S.editorActions}>
         <button onClick={onCancel} style={S.smallBtnDim}>CANCEL</button>
-        <button onClick={onSave} style={S.smallBtn} disabled={!item.item_name || !item.price_cents}>SAVE</button>
+        <button onClick={onSave} style={vs.smallBtn} disabled={!item.item_name || !item.price_cents}>SAVE</button>
       </div>
     </div>
   );
@@ -1061,7 +1158,7 @@ function ItemEditor({ item, categories, onChange, onSave, onCancel }) {
 // ============================================
 // VENUE SETTINGS
 // ============================================
-function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
+function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
   const [form, setForm] = useState({
     name: venue.name || "",
     tagline: venue.tagline || "",
@@ -1181,19 +1278,19 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
           </div>
         </div>
       </div>
-      {/* Preview swatch */}
+      {/* Preview swatch — uses current form values (live preview) */}
       <div style={{ padding: 20, borderRadius: 14, background: form.background, border: "1px solid #333", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
         <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 4, background: `linear-gradient(135deg, ${form.primary}, ${form.accent})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>{form.name?.toUpperCase() || "PREVIEW"}</span>
         <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 2 }}>{form.tagline?.toUpperCase() || "YOUR TAGLINE"}</span>
       </div>
-      <button onClick={handleSave} style={S.saveBtn}>SAVE SETTINGS</button>
+      <button onClick={handleSave} style={vs.saveBtn}>SAVE SETTINGS</button>
     </div>
   );
 }
 // ============================================
 // SQUARE SETTINGS
 // ============================================
-function SquareSettings({ venue, setVenue, showSaved }) {
+function SquareSettings({ venue, setVenue, showSaved, BRAND, vs }) {
   const [form, setForm] = useState({
     square_app_id: venue.square_app_id || "",
     square_access_token: venue.square_access_token || "",
@@ -1206,7 +1303,6 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get("square") === "connected") {
       showSaved("Square connected successfully!");
-      // Reload venue data to get new credentials
       async function reload() {
         const { data } = await supabase
           .from("venues")
@@ -1224,7 +1320,6 @@ function SquareSettings({ venue, setVenue, showSaved }) {
         }
       }
       reload();
-      // Clean URL
       window.history.replaceState({}, "", window.location.pathname);
     }
     if (urlParams.get("error")) {
@@ -1236,7 +1331,7 @@ function SquareSettings({ venue, setVenue, showSaved }) {
     const appId = "sq0idp-U-HGTJSyL66_0cvWAb1OkQ";
     const redirectUri = encodeURIComponent(`${window.location.origin}/.netlify/functions/square-oauth-callback`);
     const scope = encodeURIComponent("MERCHANT_PROFILE_READ PAYMENTS_WRITE PAYMENTS_READ ORDERS_WRITE ORDERS_READ ITEMS_READ ITEMS_WRITE");
-    const state = venue.id; // Pass venue ID so callback knows which venue to update
+    const state = venue.id;
     const authUrl = `https://connect.squareup.com/oauth2/authorize?client_id=${appId}&scope=${scope}&session=false&state=${state}&redirect_uri=${redirectUri}`;
     window.location.href = authUrl;
   };
@@ -1275,7 +1370,7 @@ function SquareSettings({ venue, setVenue, showSaved }) {
   const isConfigured = venue.square_app_id && venue.square_access_token && venue.square_location_id;
   return (
     <div style={S.settingsGrid}>
-      {/* Status badge */}
+      {/* Status badge — green/gold status colors stay unchanged */}
       <div style={{ padding: "16px", borderRadius: 10, background: isConfigured ? "#2ecc7115" : "#d4a84315", border: `1px solid ${isConfigured ? "#2ecc7133" : "#d4a84333"}`, marginBottom: 8 }}>
         <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: isConfigured ? "#2ecc71" : "#d4a843", letterSpacing: 2 }}>
           {isConfigured ? "✓ SQUARE CONNECTED — LIVE PAYMENTS ACTIVE" : "⚠ SQUARE NOT CONFIGURED — RUNNING IN DEMO MODE"}
@@ -1303,14 +1398,14 @@ function SquareSettings({ venue, setVenue, showSaved }) {
       ) : (
         /* Not connected state */
         <>
-          {/* OAuth button — the easy way */}
+          {/* OAuth button — venue colors */}
           <div style={{ padding: "24px", background: "#141414", borderRadius: 14, border: "1px solid #222", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
             <div style={{ fontSize: 36 }}>💳</div>
             <h3 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 600, letterSpacing: 2, margin: 0 }}>Connect Square</h3>
             <p style={{ fontSize: 13, color: "#888", textAlign: "center", lineHeight: 1.6, margin: 0 }}>
               Click below to securely connect your Square account. You'll be redirected to Square to authorize Waitless, then sent right back.
             </p>
-            <button onClick={handleOAuthConnect} style={S.saveBtn}>
+            <button onClick={handleOAuthConnect} style={vs.saveBtn}>
               🔗 CONNECT SQUARE ACCOUNT
             </button>
             <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 1, margin: 0 }}>
@@ -1343,9 +1438,9 @@ function SquareSettings({ venue, setVenue, showSaved }) {
                 </select>
               </div>
               <p style={{ fontSize: 12, color: "#666", lineHeight: 1.6 }}>
-                Find your credentials at <a href="https://developer.squareup.com" target="_blank" rel="noopener noreferrer" style={{ color: "#d4a843" }}>developer.squareup.com</a>
+                Find your credentials at <a href="https://developer.squareup.com" target="_blank" rel="noopener noreferrer" style={{ color: BRAND.accent }}>developer.squareup.com</a>
               </p>
-              <button onClick={handleManualSave} style={S.saveBtn}>SAVE PAYMENT SETTINGS</button>
+              <button onClick={handleManualSave} style={vs.saveBtn}>SAVE PAYMENT SETTINGS</button>
             </div>
           )}
         </>
@@ -1354,21 +1449,10 @@ function SquareSettings({ venue, setVenue, showSaved }) {
   );
 }
 // ============================================
-// EVENTS TAB — coordinates list ↔ editor
-// ============================================
-// Mirrors the pattern used by MenuBuilder: this wrapper owns the
-// "which event am I editing" state and swaps between EventsListView
-// and EventEditorView. AdminView itself doesn't need to know.
-//
-// editingEventId semantics:
-//   null   — show the list (default)
-//   "new"  — show the editor in create mode (passes eventId={null} downstream)
-//   <uuid> — show the editor in edit mode for that event
+// EVENTS TAB
 // ============================================
 function EventsTab({ venue, BRAND }) {
   const [editingEventId, setEditingEventId] = useState(null);
-  // Bumping this forces EventsListView to re-fetch after the editor closes,
-  // so newly-created or edited events appear without a page reload.
   const [listRefreshKey, setListRefreshKey] = useState(0);
   const handleCreate = () => setEditingEventId("new");
   const handleEdit = (eventId) => setEditingEventId(eventId);
@@ -1397,8 +1481,14 @@ function EventsTab({ venue, BRAND }) {
   );
 }
 // ============================================
-// STYLES
+// STATIC STYLES (S)
 // ============================================
+// These don't depend on the venue's brand colors. Anything that DID get
+// venue-themed lives in buildVenueStyles(BRAND) at the top of this file.
+//
+// Pre-login auth elements (S.authLogo, S.authButton, S.authTabActive,
+// S.spinner) intentionally keep Waitless brand colors — see "Shopify model"
+// note in file header.
 const S = {
   centered: {
     display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
@@ -1408,7 +1498,7 @@ const S = {
     width: 40, height: 40, borderRadius: "50%", border: "3px solid #222",
     borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite",
   },
-  // Auth
+  // Auth — Waitless-branded (Shopify model)
   authCard: {
     background: "#141414", borderRadius: 20, padding: "36px 28px", maxWidth: 360, width: "100%",
     display: "flex", flexDirection: "column", gap: 16, border: "1px solid #222",
@@ -1441,10 +1531,6 @@ const S = {
     display: "flex", justifyContent: "space-between", alignItems: "center",
     padding: "20px 0", borderBottom: "1px solid #222",
   },
-  headerTitle: {
-    fontFamily: "'Oswald', sans-serif", fontSize: 22, fontWeight: 700, letterSpacing: 4, margin: 0,
-    background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-  },
   headerSub: { fontFamily: "'Space Mono', monospace", fontSize: 9, color: "#666", letterSpacing: 2, margin: "2px 0 0", textTransform: "uppercase" },
   headerRight: { display: "flex", alignItems: "center", gap: 12 },
   savedBadge: {
@@ -1455,51 +1541,31 @@ const S = {
     background: "transparent", border: "1px solid #333", borderRadius: 8, padding: "6px 14px",
     color: "#666", fontFamily: "'Space Mono', monospace", fontSize: 10, letterSpacing: 1, cursor: "pointer",
   },
-  // Tabs
+  // Tabs — base style (active state via vs.tabActive)
   tabBar: {
-  display: "flex",
-  gap: 8,
-  padding: "16px 0",
-  borderBottom: "1px solid #222",
-  overflowX: "auto",
-  overflowY: "hidden",
-  flexWrap: "nowrap",
-  WebkitOverflowScrolling: "touch",
-  scrollbarWidth: "thin",
-},
+    display: "flex",
+    gap: 8,
+    padding: "16px 0",
+    borderBottom: "1px solid #222",
+    overflowX: "auto",
+    overflowY: "hidden",
+    flexWrap: "nowrap",
+    WebkitOverflowScrolling: "touch",
+    scrollbarWidth: "thin",
+  },
   tab: {
-  padding: "10px 20px", borderRadius: 10, border: "1px solid #333", background: "transparent",
-  color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 500,
-  letterSpacing: 2, cursor: "pointer",
-  flexShrink: 0,
-  whiteSpace: "nowrap",
-},
-  tabActive: { background: "#1E4D8C22", borderColor: "#1E4D8C", color: "#1E4D8C" },
+    padding: "10px 20px", borderRadius: 10, border: "1px solid #333", background: "transparent",
+    color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 500,
+    letterSpacing: 2, cursor: "pointer",
+    flexShrink: 0,
+    whiteSpace: "nowrap",
+  },
   content: { padding: "20px 0" },
   // Menu builder
   menuSection: { marginBottom: 28 },
-  menuCategoryHeader: {
-    fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600, letterSpacing: 4,
-    color: "#d4a843", textTransform: "uppercase", marginBottom: 12, paddingBottom: 8,
-    borderBottom: "1px solid #d4a8434d",
-  },
-  // NEW: Category header with management controls
-  categoryHeaderRow: {
-    display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 8,
-    borderBottom: "1px solid #d4a8434d",
-  },
-  categoryHeaderText: {
-    flex: 1, margin: 0, fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
-    letterSpacing: 4, color: "#d4a843", textTransform: "uppercase", cursor: "pointer",
-  },
   categoryItemCount: {
     fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#666",
     letterSpacing: 1, marginLeft: 6, textTransform: "none",
-  },
-  categoryHeaderInput: {
-    flex: 1, padding: "6px 10px", background: "#141414", border: "1px solid #d4a843",
-    borderRadius: 6, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 13,
-    letterSpacing: 4, textTransform: "uppercase", outline: "none",
   },
   categoryControls: { display: "flex", gap: 4 },
   categoryCtrlBtn: {
@@ -1515,7 +1581,6 @@ const S = {
   menuItemName: { fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 500, letterSpacing: 0.5 },
   menuItemDesc: { fontSize: 12, color: "#888" },
   menuRowRight: { display: "flex", alignItems: "center", gap: 10 },
-  menuItemPrice: { fontFamily: "'Space Mono', monospace", fontSize: 14, color: "#d4a843" },
   iconBtn: {
     background: "transparent", border: "none", fontSize: 14, cursor: "pointer", padding: 4,
     filter: "grayscale(0.5)", transition: "filter 0.2s",
@@ -1525,16 +1590,7 @@ const S = {
     background: "transparent", color: "#666", fontFamily: "'Space Mono', monospace",
     fontSize: 11, letterSpacing: 1, cursor: "pointer", marginTop: 6,
   },
-  addCategoryBtn: {
-    padding: "12px 20px", borderRadius: 10, border: "1px dashed #d4a84366",
-    background: "#d4a84308", color: "#d4a843", fontFamily: "'Oswald', sans-serif",
-    fontSize: 14, fontWeight: 500, letterSpacing: 2, cursor: "pointer", marginTop: 8,
-  },
   // Item editor
-  editorCard: {
-    padding: 16, background: "#141414", borderRadius: 12, border: "1px solid #1E4D8C44",
-    display: "flex", flexDirection: "column", gap: 10, marginBottom: 8,
-  },
   editorRow: { display: "flex", gap: 10 },
   editorField: { flex: 1, display: "flex", flexDirection: "column", gap: 4 },
   editorActions: { display: "flex", justifyContent: "flex-end", gap: 8 },
@@ -1567,30 +1623,15 @@ const S = {
     padding: "8px", background: "#1a1a1a", border: "1px solid #333", borderRadius: 6,
     color: "#f5f5f5", fontFamily: "'Space Mono', monospace", fontSize: 12, width: 80, outline: "none",
   },
-  // Buttons
-  smallBtn: {
-    padding: "8px 16px", borderRadius: 8, border: "none", background: "#1E4D8C",
-    color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600,
-    letterSpacing: 2, cursor: "pointer",
-  },
+  // Buttons — smallBtnDim is neutral, smallBtn is in vs.smallBtn (venue-themed)
   smallBtnDim: {
     padding: "8px 16px", borderRadius: 8, border: "1px solid #333", background: "transparent",
     color: "#888", fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500,
     letterSpacing: 2, cursor: "pointer",
   },
-  saveBtn: {
-    padding: "16px", borderRadius: 10, border: "none",
-    background: "linear-gradient(135deg, #1E4D8C, #d4a843)",
-    color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700,
-    letterSpacing: 3, cursor: "pointer", marginTop: 8,
-  },
   // Preview
   previewBar: {
     position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "center",
     gap: 16, padding: "12px 20px", background: "#141414", borderTop: "1px solid #222",
-  },
-  previewLink: {
-    fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#d4a843", letterSpacing: 1,
-    textDecoration: "none",
   },
 };

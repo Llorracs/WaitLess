@@ -23,6 +23,15 @@
  * cart "Your Order" header, confirmation status text. Everything else stays
  * Oswald / Space Mono. Staff screens (bartender/manager/kitchen) keep Oswald
  * entirely — staff tools shouldn't change with venue branding.
+ *
+ * PUSH NOTIFICATIONS (Piece 14, May 14 2026):
+ * Confirmation screen has an "Enable Notifications" button shown while order
+ * is pending or in_progress. Tapping it calls pushService.subscribeOrderToPush()
+ * which triggers the browser permission prompt and saves the subscription to
+ * push_subscriptions table. send-notification.js then dispatches both an
+ * in-app Notification() (existing, only when tab open) AND a server-side push
+ * (new, works even when app is closed). Both fire intentionally — "belt and
+ * suspenders" for delivery reliability.
  * ============================================
  */
 
@@ -42,6 +51,11 @@ import {
   markItemReady,
   supabase,
 } from "./lib/barOrderService";
+import {
+  isPushSupported,
+  getPermissionState,
+  subscribeOrderToPush,
+} from "./lib/pushService";
 import AgeVerification, { isAgeVerified } from "./AgeVerification";
 import LandingPage from "./LandingPage";
 import QRGenerator from "./QRGenerator";
@@ -93,16 +107,6 @@ function getRouteFromUrl() {
 // ============================================
 // PATRON FONT HELPERS
 // ============================================
-// Build a CSS font-family string from the venue's saved font choice.
-// Fallback chain: venue choice → Oswald (current default) → sans-serif.
-//
-// All 6 supported fonts:
-//   Inter, Space Grotesk, Montserrat (sans-serif body fonts)
-//   Oswald, Bebas Neue (condensed display)
-//   Playfair Display (serif display)
-//
-// Fonts that should fall back to serif (rather than sans-serif).
-// Currently: Playfair Display (editorial serif) + Cinzel (Roman inscription serif).
 const SERIF_FONTS = new Set(["Playfair Display", "Cinzel"]);
 
 function buildPatronFontFamily(venueFont) {
@@ -122,8 +126,6 @@ const DEFAULT_BRAND = {
 
 function getBrand(venue) {
   const colors = venue?.brand_colors || DEFAULT_BRAND;
-  // patronFont is added to BRAND so child components (especially PatronView)
-  // don't need to receive the raw venue prop just to read the font setting.
   return {
     black: colors.background || "#0a0a0a",
     darkGray: "#141414",
@@ -147,9 +149,6 @@ function getBrand(venue) {
 // ============================================
 
 function ConfirmationBadge({ letter, color, timestamp, status = "pending", size = 180 }) {
-  // The confirmation letter badge intentionally uses Oswald regardless of
-  // venue font. The letter is the patron's "match to bartender" identifier;
-  // it must be maximally legible across any venue choice.
   const isReady = status === "ready";
   const isPickedUp = status === "picked_up";
   const isTerminal = isPickedUp || status === "expired";
@@ -372,6 +371,179 @@ function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
       <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: BRAND.gray }}>
         {queueInfo.position === 1 ? "You're next!" : `${queueInfo.position - 1} order${queueInfo.position - 1 !== 1 ? "s" : ""} ahead of you`}
       </span>
+    </div>
+  );
+}
+
+// ============================================
+// PUSH NOTIFICATION OPT-IN
+// ============================================
+// Self-contained component for the "Enable Notifications" UI on the
+// confirmation screen. Handles all states: idle, subscribing, subscribed,
+// denied, unsupported, error. Hides itself entirely when device can't
+// receive pushes (rather than showing a confusing "this won't work" message).
+//
+// Why a separate component: keeps PatronView readable, isolates pushService
+// imports/state, makes future tweaks easier (e.g. A/B test wording).
+// ============================================
+function PushOptIn({ orderId, venueId, BRAND }) {
+  // 'idle'        — supported, hasn't been asked or hasn't subscribed
+  // 'subscribing' — request in flight (button shows spinner)
+  // 'subscribed'  — success
+  // 'denied'      — permission denied, can't ask again
+  // 'unsupported' — device doesn't support push at all
+  // 'error'       — generic failure (rare)
+  const [status, setStatus] = useState("idle");
+
+  // On mount, detect what state we're in
+  useEffect(() => {
+    if (!isPushSupported()) {
+      setStatus("unsupported");
+      return;
+    }
+    const perm = getPermissionState();
+    if (perm === "denied") {
+      setStatus("denied");
+    }
+    // For 'granted' and 'default', stay in 'idle' — the patron still taps
+    // the button. Even if the browser already has permission, we want the
+    // patron to see they're opting in to notifications for THIS order.
+  }, []);
+
+  const handleClick = async () => {
+    setStatus("subscribing");
+    const result = await subscribeOrderToPush({ orderId, venueId });
+    if (result.ok) {
+      setStatus("subscribed");
+    } else if (result.reason === "denied") {
+      setStatus("denied");
+    } else if (result.reason === "unsupported") {
+      setStatus("unsupported");
+    } else {
+      console.error("Push subscribe failed:", result);
+      setStatus("error");
+    }
+  };
+
+  // Silent fallback — render nothing on devices that can't do push.
+  // Better UX than showing a confusing "your device can't do this" message.
+  if (status === "unsupported") return null;
+
+  // Subscribed — small confirmation
+  if (status === "subscribed") {
+    return (
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        padding: "10px 16px", background: `${BRAND.success}15`,
+        border: `1px solid ${BRAND.success}44`, borderRadius: 12,
+        maxWidth: 280, width: "100%",
+      }}>
+        <span style={{ fontSize: 14, color: BRAND.success }}>✓</span>
+        <span style={{
+          fontFamily: "'Space Mono', monospace", fontSize: 11,
+          color: BRAND.success, letterSpacing: 1,
+        }}>
+          YOU'LL BE NOTIFIED WHEN READY
+        </span>
+      </div>
+    );
+  }
+
+  // Denied — explain how to fix, but gently
+  if (status === "denied") {
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
+        padding: "10px 16px", background: "#1a1a1a",
+        border: "1px solid #333", borderRadius: 12,
+        maxWidth: 280, width: "100%", textAlign: "center",
+      }}>
+        <span style={{
+          fontFamily: "'Space Mono', monospace", fontSize: 10,
+          color: BRAND.dimText, letterSpacing: 1,
+        }}>
+          NOTIFICATIONS BLOCKED
+        </span>
+        <span style={{ fontSize: 11, color: BRAND.gray, lineHeight: 1.4 }}>
+          To enable, check your browser settings.
+        </span>
+      </div>
+    );
+  }
+
+  // Error — generic, with retry
+  if (status === "error") {
+    return (
+      <button
+        onClick={handleClick}
+        style={{
+          padding: "12px 20px", background: "transparent",
+          border: `1px solid ${BRAND.danger}66`, borderRadius: 12,
+          color: BRAND.danger, fontFamily: "'Oswald', sans-serif",
+          fontSize: 12, fontWeight: 500, letterSpacing: 2,
+          cursor: "pointer",
+        }}
+      >
+        TRY AGAIN
+      </button>
+    );
+  }
+
+  // Subscribing — button in loading state
+  if (status === "subscribing") {
+    return (
+      <button
+        disabled
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+          padding: "12px 24px",
+          background: BRAND.cardBg,
+          border: `1px solid ${BRAND.primary}44`,
+          borderRadius: 12,
+          color: BRAND.gray,
+          fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 500,
+          letterSpacing: 2, cursor: "default",
+          maxWidth: 280, width: "100%",
+        }}
+      >
+        <div style={{
+          width: 14, height: 14, borderRadius: "50%",
+          border: `2px solid ${BRAND.dimText}`, borderTopColor: BRAND.primary,
+          animation: "spin 1s linear infinite",
+        }} />
+        SETTING UP...
+      </button>
+    );
+  }
+
+  // Idle — the main call-to-action
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", gap: 10,
+      maxWidth: 280, width: "100%",
+    }}>
+      <p style={{
+        fontSize: 13, color: BRAND.gray, lineHeight: 1.5,
+        margin: 0, textAlign: "center",
+      }}>
+        Get a heads up the moment your order is ready
+      </p>
+      <button
+        onClick={handleClick}
+        style={{
+          width: "100%", padding: "14px 24px",
+          background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
+          border: "none", borderRadius: 12,
+          color: BRAND.white,
+          fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700,
+          letterSpacing: 3, cursor: "pointer",
+          boxShadow: `0 4px 16px ${BRAND.primaryGlow}`,
+          display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
+        }}
+      >
+        <span style={{ fontSize: 16 }}>🔔</span>
+        NOTIFY ME
+      </button>
     </div>
   );
 }
@@ -1302,6 +1474,12 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             timestamp={new Date(currentOrder.ordered_at).getTime()}
             status={currentOrder.status}
           />
+
+          {/* Push notification opt-in — only show while order is pending or
+              in_progress. No point showing once the order is already ready. */}
+          {(currentOrder.status === "pending" || currentOrder.status === "in_progress") && (
+            <PushOptIn orderId={currentOrder.id} venueId={venue.id} BRAND={BRAND} />
+          )}
 
           {currentOrder.status !== "ready" && currentOrder.status !== "picked_up" && (
             <QueueEstimate venueId={venue.id} orderId={currentOrder.id} orderedAt={currentOrder.ordered_at} BRAND={BRAND} />

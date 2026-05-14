@@ -101,8 +101,9 @@ function getRouteFromUrl() {
 //   Oswald, Bebas Neue (condensed display)
 //   Playfair Display (serif display)
 //
-// Fonts that should fall back to serif (only Playfair currently):
-const SERIF_FONTS = new Set(["Playfair Display"]);
+// Fonts that should fall back to serif (rather than sans-serif).
+// Currently: Playfair Display (editorial serif) + Cinzel (Roman inscription serif).
+const SERIF_FONTS = new Set(["Playfair Display", "Cinzel"]);
 
 function buildPatronFontFamily(venueFont) {
   const font = (venueFont || "Oswald").trim();

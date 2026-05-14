@@ -9,13 +9,20 @@
  * URL structure:
  *   waitless.app/{slug}                              → Patron ordering view
  *   waitless.app/{slug}/bartender                    → Bartender queue view
- *   waitless.app/{slug}/buy/{eventSlug}              → Buy tickets page (NEW)
- *   waitless.app/{slug}/buy/{eventSlug}/confirmation → Post-payment confirmation (NEW)
+ *   waitless.app/{slug}/buy/{eventSlug}              → Buy tickets page
+ *   waitless.app/{slug}/buy/{eventSlug}/confirmation → Post-payment confirmation
  * 
  * On load:
  * 1. Parses venue slug from URL
  * 2. Fetches venue config from Supabase (branding, Square config, menu)
  * 3. Renders with that venue's theme
+ *
+ * PATRON FONT (Piece 12 Chunk 2):
+ * Patron-facing headers use venue.patron_font (from BRAND.patronFont).
+ * Applied ONLY to: venue name header in PatronView, category headers in menu,
+ * cart "Your Order" header, confirmation status text. Everything else stays
+ * Oswald / Space Mono. Staff screens (bartender/manager/kitchen) keep Oswald
+ * entirely — staff tools shouldn't change with venue branding.
  * ============================================
  */
 
@@ -55,17 +62,13 @@ function getRouteFromUrl() {
   const parts = path.split("/");
   const slug = parts[0] || null;
 
-  // Existing staff/admin routes
   const isManager = parts[1] === "manager";
   const isBartender = parts[1] === "bartender";
   const isKitchen = parts[1] === "kitchen";
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
-  const isCheckin = parts[1] === "checkin"; // NEW: door scanner
+  const isCheckin = parts[1] === "checkin";
 
-  // NEW: ticket buy + confirmation routes
-  // /{slug}/buy/{eventSlug}                   → Buy page
-  // /{slug}/buy/{eventSlug}/confirmation      → Confirmation page
   const isBuy = parts[1] === "buy" && !!parts[2];
   const eventSlug = isBuy ? parts[2] : null;
   const isBuyConfirmation = isBuy && parts[3] === "confirmation";
@@ -88,6 +91,26 @@ function getRouteFromUrl() {
 }
 
 // ============================================
+// PATRON FONT HELPERS
+// ============================================
+// Build a CSS font-family string from the venue's saved font choice.
+// Fallback chain: venue choice → Oswald (current default) → sans-serif.
+//
+// All 6 supported fonts:
+//   Inter, Space Grotesk, Montserrat (sans-serif body fonts)
+//   Oswald, Bebas Neue (condensed display)
+//   Playfair Display (serif display)
+//
+// Fonts that should fall back to serif (only Playfair currently):
+const SERIF_FONTS = new Set(["Playfair Display"]);
+
+function buildPatronFontFamily(venueFont) {
+  const font = (venueFont || "Oswald").trim();
+  const fallback = SERIF_FONTS.has(font) ? "serif" : "sans-serif";
+  return `'${font}', ${fallback}`;
+}
+
+// ============================================
 // DEFAULT BRAND (used as fallback)
 // ============================================
 const DEFAULT_BRAND = {
@@ -98,6 +121,8 @@ const DEFAULT_BRAND = {
 
 function getBrand(venue) {
   const colors = venue?.brand_colors || DEFAULT_BRAND;
+  // patronFont is added to BRAND so child components (especially PatronView)
+  // don't need to receive the raw venue prop just to read the font setting.
   return {
     black: colors.background || "#0a0a0a",
     darkGray: "#141414",
@@ -112,6 +137,7 @@ function getBrand(venue) {
     success: "#2ecc71",
     warning: "#f39c12",
     danger: "#e74c3c",
+    patronFont: buildPatronFontFamily(venue?.patron_font),
   };
 }
 
@@ -120,10 +146,9 @@ function getBrand(venue) {
 // ============================================
 
 function ConfirmationBadge({ letter, color, timestamp, status = "pending", size = 180 }) {
-  // Derive animation behavior from status — one source of truth.
-  // - pending/in_progress: slow pulse (waiting)
-  // - ready: fast pulse (attention — pick me up!)
-  // - picked_up / expired: no pulse, static
+  // The confirmation letter badge intentionally uses Oswald regardless of
+  // venue font. The letter is the patron's "match to bartender" identifier;
+  // it must be maximally legible across any venue choice.
   const isReady = status === "ready";
   const isPickedUp = status === "picked_up";
   const isTerminal = isPickedUp || status === "expired";
@@ -133,18 +158,16 @@ function ConfirmationBadge({ letter, color, timestamp, status = "pending", size 
   const PICKUP_WINDOW = 600;
   const [remaining, setRemaining] = useState(PICKUP_WINDOW);
 
-  // Pulse animation — stops entirely on terminal states
   useEffect(() => {
     if (!shouldPulse) {
-      setPulse(false); // Reset to static
-      return; // No interval scheduled
+      setPulse(false);
+      return;
     }
     const speed = isReady ? 600 : 1200;
     const i = setInterval(() => setPulse((p) => !p), speed);
     return () => clearInterval(i);
   }, [shouldPulse, isReady]);
 
-  // Countdown timer — stops once the drink is ready (countdown only matters pre-ready)
   useEffect(() => {
     if (isReady || isTerminal) return;
     const tick = () => {
@@ -161,7 +184,6 @@ function ConfirmationBadge({ letter, color, timestamp, status = "pending", size 
   const isUrgent = remaining <= 120;
   const isExpired = remaining === 0;
 
-  // Static shadow for terminal states, pulsing otherwise
   const boxShadow = !shouldPulse
     ? `0 0 15px ${color.hex}33, inset 0 0 10px ${color.hex}11`
     : pulse
@@ -285,7 +307,6 @@ function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
   useEffect(() => {
     async function calcEstimate() {
       try {
-        // Get all active orders ahead of this one
         const { data: activeOrders } = await supabase
           .from("bar_orders")
           .select("id, ordered_at")
@@ -296,7 +317,6 @@ function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
 
         const position = (activeOrders?.length || 0) + 1;
 
-        // Get average make time from last 20 completed orders
         const { data: recentOrders } = await supabase
           .from("bar_orders")
           .select("ordered_at, ready_at")
@@ -306,20 +326,20 @@ function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
           .order("ready_at", { ascending: false })
           .limit(20);
 
-        let avgMinutes = 5; // Default estimate
+        let avgMinutes = 5;
         if (recentOrders && recentOrders.length >= 3) {
           const makeTimes = recentOrders.map((o) => {
             const start = new Date(o.ordered_at).getTime();
             const end = new Date(o.ready_at).getTime();
-            return (end - start) / 1000 / 60; // minutes
-          }).filter((t) => t > 0 && t < 60); // Filter outliers
+            return (end - start) / 1000 / 60;
+          }).filter((t) => t > 0 && t < 60);
 
           if (makeTimes.length > 0) {
             avgMinutes = Math.round(makeTimes.reduce((a, b) => a + b, 0) / makeTimes.length);
           }
         }
 
-        const estimateMinutes = Math.max(1, Math.round(avgMinutes * position / 2)); // Parallel processing factor
+        const estimateMinutes = Math.max(1, Math.round(avgMinutes * position / 2));
 
         setQueueInfo({ position, avgMinutes, estimateMinutes });
       } catch (err) {
@@ -328,7 +348,7 @@ function QueueEstimate({ venueId, orderId, orderedAt, BRAND }) {
     }
 
     calcEstimate();
-    const interval = setInterval(calcEstimate, 15000); // Refresh every 15 seconds
+    const interval = setInterval(calcEstimate, 15000);
     return () => clearInterval(interval);
   }, [venueId, orderId, orderedAt]);
 
@@ -365,7 +385,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [ageVerified, setAgeVerifiedState] = useState(false);
   const [demoView, setDemoView] = useState("patron");
-  const [demoOrders, setDemoOrders] = useState([]); // Persisted across demo view switches
+  const [demoOrders, setDemoOrders] = useState([]);
   const {
     slug,
     isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin,
@@ -374,14 +394,12 @@ export default function App() {
     isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
   } = getRouteFromUrl();
 
-  // Set demo view based on URL on mount
   useEffect(() => {
     if (isManager) setDemoView("manager");
     if (isBartender) setDemoView("bartender");
     if (isKitchen) setDemoView("kitchen");
   }, []);
 
-  // OAuth redirect handler
   useEffect(() => {
     if (!isOAuthComplete) return;
     const urlParams = new URLSearchParams(window.location.search);
@@ -407,23 +425,19 @@ export default function App() {
     redirectToAdmin();
   }, [isOAuthComplete]);
 
- // Legal pages — no venue needed
-if (isPrivacy) return <PrivacyPolicy />;
+ if (isPrivacy) return <PrivacyPolicy />;
 if (isTerms) return <TermsOfService />;
 if (isRefundPolicy) return <RefundPolicy />;
 if (isVenueTerms) return <VenueTerms />;
 
-  // Signup page — no venue needed
   if (isSignup) {
     return <OnboardingView BRAND={getBrand(null)} />;
   }
 
-  // Master admin — platform owner panel
   if (isMasterAdmin) {
     return <MasterAdmin />;
   }
 
-  // OAuth complete — show loading while redirect happens
   if (isOAuthComplete) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
@@ -446,7 +460,6 @@ if (isVenueTerms) return <VenueTerms />;
         const menuData = await getVenueMenu(venueData.id);
         setMenu(menuData);
 
-        // Check if already verified in this session
         if (isAgeVerified(venueData.id)) {
           setAgeVerifiedState(true);
         }
@@ -463,7 +476,6 @@ if (isVenueTerms) return <VenueTerms />;
 
   const BRAND = getBrand(venue);
 
-  // No slug = landing page
   if (!slug && !loading) {
     return <LandingPage />;
   }
@@ -471,7 +483,6 @@ if (isVenueTerms) return <VenueTerms />;
   if (loading) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5" }}>
-        <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
         <div style={{ width: 50, height: 50, borderRadius: "50%", border: "3px solid #222", borderTopColor: "#1E4D8C", animation: "spin 1s linear infinite" }} />
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#666", marginTop: 16, letterSpacing: 2 }}>LOADING VENUE...</p>
@@ -482,25 +493,19 @@ if (isVenueTerms) return <VenueTerms />;
   if (error) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", background: "#0a0a0a", color: "#f5f5f5", padding: 24, textAlign: "center" }}>
-        <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
         <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 28, fontWeight: 700, letterSpacing: 4, marginBottom: 16, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>WAITLESS</h1>
         <p style={{ fontFamily: "'Space Mono', monospace", fontSize: 13, color: "#888", maxWidth: 400 }}>{error}</p>
       </div>
     );
   }
 
-  // Age verification — no longer gates the venue, checked at checkout based on cart contents
-  const needsAgeVerification = false; // Moved to checkout flow in PatronView
+  const needsAgeVerification = false;
 
   const isDemo = slug === "demo";
 
   return (
     <div style={{ minHeight: "100vh", background: BRAND.black, color: BRAND.white, fontFamily: "'Inter', sans-serif" }}>
-      <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
-      {/* Demo view switcher bar — hidden on buy/confirmation pages so buyers
-          don't see "BARTENDER MODE" buttons when they're paying for a ticket.
-          Also hidden on checkin pages so the camera UI is unobstructed. */}
       {isDemo && !isAdmin && !isQR && !isBuy && !isCheckin && (
         <div style={{
           position: "sticky", top: 0, zIndex: 200,
@@ -540,9 +545,6 @@ if (isVenueTerms) return <VenueTerms />;
         <AgeVerification venue={venue} BRAND={BRAND} onVerified={() => setAgeVerifiedState(true)} />
       )}
 
-      {/* Routing — order matters. More specific routes first.
-          Buy confirmation must precede plain buy route so the
-          /confirmation suffix is recognized. */}
       {isBuyConfirmation ? (
         <BuyConfirmationView venue={venue} BRAND={BRAND} eventSlug={eventSlug} />
       ) : isBuy ? (
@@ -573,28 +575,22 @@ if (isVenueTerms) return <VenueTerms />;
 function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const [cart, setCart] = useState([]);
   const [view, setView] = useState(() => {
-    // If returning to patron view with existing demo orders, show confirmation
     if (demoOrders && demoOrders.length > 0) return "confirmation";
     return "menu";
   });
   const [processingStep, setProcessingStep] = useState("");
- const [activeOrders, setActiveOrders] = useState(demoOrders || []); // Restore from demo state if available
-  const [activeOrderIndex, setActiveOrderIndex] = useState(0); // Which badge is showing
+ const [activeOrders, setActiveOrders] = useState(demoOrders || []);
+  const [activeOrderIndex, setActiveOrderIndex] = useState(0);
 
-  // Persist active order IDs to localStorage so patron can leave/return to the app
-  // without losing their confirmation screen. Keys are scoped per venue.
-  // Auto-expires entries older than 30min (by then status would be picked_up or expired).
   const ACTIVE_ORDERS_KEY = `waitless_active_orders_${venue.id}`;
-  const ACTIVE_ORDERS_TTL = 30 * 60 * 1000; // 30 minutes
+  const ACTIVE_ORDERS_TTL = 30 * 60 * 1000;
 
-  // On mount: restore active orders from localStorage by re-fetching from Supabase
   useEffect(() => {
-    if (demoOrders && demoOrders.length > 0) return; // Demo flow handles its own restore
+    if (demoOrders && demoOrders.length > 0) return;
     try {
       const raw = localStorage.getItem(ACTIVE_ORDERS_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      // Filter out stale entries
       const fresh = (parsed || []).filter((entry) => {
         return entry.id && (Date.now() - (entry.savedAt || 0) < ACTIVE_ORDERS_TTL);
       });
@@ -603,34 +599,29 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         return;
       }
       const ids = fresh.map((e) => e.id);
-      // Re-fetch from Supabase to get current statuses
       async function restoreOrders() {
         const { data } = await supabase
           .from("bar_orders")
           .select("*")
           .in("id", ids);
         if (data && data.length > 0) {
-          // Filter out picked_up and expired - patron doesn't need to see those
           const active = data.filter((o) => o.status !== "picked_up" && o.status !== "expired");
           if (active.length > 0) {
             setActiveOrders(active);
             setView("confirmation");
           } else {
-            // All previous orders are done — clean up
             localStorage.removeItem(ACTIVE_ORDERS_KEY);
           }
         }
       }
       restoreOrders();
     } catch (_err) {
-      // Corrupt localStorage entry — clear it
       try { localStorage.removeItem(ACTIVE_ORDERS_KEY); } catch (_e) {}
     }
   }, [venue.id]);
 
-  // Persist active order IDs whenever the list changes
   useEffect(() => {
-    if (demoOrders) return; // Don't persist demo state
+    if (demoOrders) return;
     try {
       if (activeOrders.length === 0) {
         localStorage.removeItem(ACTIVE_ORDERS_KEY);
@@ -642,36 +633,27 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       }));
       localStorage.setItem(ACTIVE_ORDERS_KEY, JSON.stringify(toSave));
     } catch (_err) {
-      // localStorage might be disabled — fail silently
     }
   }, [activeOrders, ACTIVE_ORDERS_KEY, demoOrders]);
-  const [tipPercent, setTipPercent] = useState(0); // 0, 15, 18, 20, or custom
+  const [tipPercent, setTipPercent] = useState(0);
   const [customTip, setCustomTip] = useState("");
   const [showCustomTip, setShowCustomTip] = useState(false);
-  const [patronPhone, setPatronPhone] = useState(""); // For SMS notifications
-  const [notifyMethod, setNotifyMethod] = useState("both"); // sms | push | both | none
-  const [specialInstructions, setSpecialInstructions] = useState(""); // Order-level notes
-  const [showAgeVerification, setShowAgeVerification] = useState(false); // Cart-based age check
+  const [patronPhone, setPatronPhone] = useState("");
+  const [notifyMethod, setNotifyMethod] = useState("both");
+  const [specialInstructions, setSpecialInstructions] = useState("");
+  const [showAgeVerification, setShowAgeVerification] = useState(false);
   const [ageVerified, setAgeVerified] = useState(() => isAgeVerified(venue.id));
 
-  // Cart-based age verification
-  // Default: ANY item with station "bar" in the cart triggers age verification.
-  // Venues can explicitly opt out by setting require_age_verification === false.
-  // Previous bug: the check silently no-op'd when require_age_verification was
-  // null/undefined, so bar items sailed through with no gate. This treats the
-  // flag as default-on unless explicitly disabled.
   const cartHasAlcohol = cart.some((item) => item.station === "bar");
   const ageRequiredByVenue = venue?.require_age_verification !== false;
   const needsAgeCheck = ageRequiredByVenue && cartHasAlcohol && !ageVerified;
 
-  // Sync active orders back to parent demo state when they change
   useEffect(() => {
     if (setDemoOrders && activeOrders.length > 0) {
       setDemoOrders(activeOrders);
     }
   }, [activeOrders]);
 
-  // Re-fetch order statuses when remounting with demo orders (they may be stale)
   useEffect(() => {
     if (!demoOrders || demoOrders.length === 0) return;
     async function refreshStatuses() {
@@ -687,18 +669,14 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
     refreshStatuses();
   }, []);
 
-  // Modifier modal state
-  const [modifierModal, setModifierModal] = useState(null); // { item, modifiers, selectedMods, notes }
+  const [modifierModal, setModifierModal] = useState(null);
   const [loadingModifiers, setLoadingModifiers] = useState(false);
 
-  // Request push notification permission on mount
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
-      // We'll ask when they place their first order, not on page load
     }
   }, []);
 
-  // Group menu items by category
   const menuByCategory = menu.reduce((acc, item) => {
     if (!acc[item.category]) acc[item.category] = [];
     acc[item.category].push(item);
@@ -708,17 +686,14 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   ? venue.category_order.filter((cat) => menuByCategory[cat])
   : Object.keys(menuByCategory);
 
-  // Current displayed order
   const currentOrder = activeOrders[activeOrderIndex];
   const anyReady = activeOrders.some((o) => o.status === "ready");
 
-  // Handle adding an item — check for modifiers first
   const handleAddItem = async (item) => {
     setLoadingModifiers(true);
     try {
       const modifiers = await getMenuItemModifiers(item.id);
       if (modifiers && modifiers.length > 0) {
-        // Item has modifiers — show the modal
         const selectedMods = {};
         modifiers.forEach((group) => {
           const defaultOpt = group.options.find((o) => o.is_default);
@@ -730,23 +705,19 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         });
         setModifierModal({ item, modifiers, selectedMods, notes: "" });
       } else {
-        // No modifiers — add directly
         addToCart(item, [], "");
       }
     } catch (err) {
-      // If modifier fetch fails, just add the item plain
       addToCart(item, [], "");
     } finally {
       setLoadingModifiers(false);
     }
   };
 
-  // Confirm modifier selections and add to cart
   const confirmModifierSelection = () => {
     if (!modifierModal) return;
     const { item, modifiers, selectedMods, notes } = modifierModal;
 
-    // Build selected modifier labels and extra cost
     const selectedModifiers = [];
     let extraCents = 0;
 
@@ -768,7 +739,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   };
 
   const addToCart = (item, modifiers = [], itemNotes = "", extraCents = 0) => {
-    // Create a unique key based on item + modifiers combo
     const modKey = modifiers.map((m) => `${m.group}:${m.option}`).sort().join("|");
     const cartKey = `${item.id}_${modKey}_${itemNotes}`;
 
@@ -795,23 +765,16 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
   const totalCents = subtotalCents + feeCents + tipCents;
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
-  // Subscribe to each active order individually via a ref-keyed map.
-  // Previous bug: re-running the effect on array length change tore down ALL
-  // subscriptions and rebuilt them — creating a reconnect gap where "ready"
-  // updates could be dropped. This version adds a subscription per new order id
-  // and only tears down the subscription for an order that's actually gone.
-  const subscriptionsRef = useRef(new Map()); // orderId -> unsubscribe fn
+  const subscriptionsRef = useRef(new Map());
 
   useEffect(() => {
     const current = subscriptionsRef.current;
     const activeIds = new Set(activeOrders.map((o) => o.id));
 
-    // Add subscriptions for any new orders
     activeOrders.forEach((ord) => {
-      if (current.has(ord.id)) return; // Already subscribed
+      if (current.has(ord.id)) return;
 
       const unsub = subscribeToOrder(ord.id, (newStatus, updatedOrder) => {
-        // Always update from the payload — single source of truth
         setActiveOrders((prev) =>
           prev.map((o) =>
             o.id === ord.id
@@ -820,7 +783,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
           )
         );
 
-        // Fire push notification when this specific order flips to ready
         if (newStatus === "ready" && "Notification" in window && Notification.permission === "granted") {
           try {
             new Notification(`${venue.name} — Your order is ready!`, {
@@ -829,7 +791,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
               tag: `order-${ord.id}`,
             });
           } catch (_err) {
-            // Notification failures are non-fatal
           }
         }
       });
@@ -837,35 +798,28 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       current.set(ord.id, unsub);
     });
 
-    // Remove subscriptions for orders that are no longer active
     for (const [id, unsub] of current.entries()) {
       if (!activeIds.has(id)) {
-        try { unsub(); } catch (_err) { /* ignore */ }
+        try { unsub(); } catch (_err) { }
         current.delete(id);
       }
     }
   }, [activeOrders, venue.name, venue.logo_url]);
 
-  // Clean up all subscriptions when PatronView unmounts
   useEffect(() => {
     return () => {
       for (const unsub of subscriptionsRef.current.values()) {
-        try { unsub(); } catch (_err) { /* ignore */ }
+        try { unsub(); } catch (_err) { }
       }
       subscriptionsRef.current.clear();
     };
   }, []);
 
-  // Demo mode: no Square credentials → skip payment entirely
   const isDemoMode = !venue.square_app_id || !venue.square_location_id;
 
   const handleCheckout = async (skipAgeCheck = false) => {
-    // Defensive: only an explicit boolean `true` skips the gate. This prevents
-    // callers that accidentally pass a truthy non-boolean (like a React synthetic
-    // event from onClick={handleCheckout}) from bypassing age verification.
     const shouldSkip = skipAgeCheck === true;
 
-    // Check if age verification is needed before proceeding
     if (!shouldSkip && needsAgeCheck) {
       setShowAgeVerification(true);
       return;
@@ -873,20 +827,15 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
 
     setView("processing");
 
-    // Declared at function scope so squarePaymentId/squareOrderId can read it
-    // below the try/else block. Previous bug: `data` was block-scoped inside
-    // the else branch, causing a ReferenceError on real-payment checkout.
     let paymentResult = null;
 
     try {
       if (isDemoMode) {
-        // Demo flow — simulate payment steps, skip Square
         setProcessingStep("Securing payment...");
         await new Promise((r) => setTimeout(r, 800));
         setProcessingStep("Processing payment...");
         await new Promise((r) => setTimeout(r, 1000));
       } else {
-        // Real flow — tokenize and charge via Square
         setProcessingStep("Securing payment...");
 
         const cardResult = await window.__waitlessCard?.tokenize();
@@ -914,7 +863,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
 
       setProcessingStep("Confirming order...");
 
-      // Generate confirmation and create order (same for both modes)
       const { letter, color } = await generateUniqueConfirmation(venue.id);
       const newOrder = await createBarOrder({
         venueId: venue.id,
@@ -955,12 +903,12 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto" }}>
-      {/* Header */}
+      {/* Header — venue name uses BRAND.patronFont (Piece 12-2) */}
       <div style={{ position: "sticky", top: 0, zIndex: 90, background: `linear-gradient(180deg, ${BRAND.black} 80%, transparent)`, padding: "12px 20px 20px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div>
             {venue.logo_url && <img src={venue.logo_url} alt="" style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover", marginBottom: 4 }} />}
-            <h1 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 24, fontWeight: 700, letterSpacing: 4, margin: 0, background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            <h1 style={{ fontFamily: BRAND.patronFont, fontSize: 24, fontWeight: 700, letterSpacing: 4, margin: 0, background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
               {venue.name.toUpperCase()}
             </h1>
             {venue.tagline && (
@@ -992,7 +940,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         <div style={{ padding: "0 20px 100px" }}>
           {categories.map((catName) => (
             <div key={catName} style={{ marginBottom: 32 }}>
-              <h2 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600, letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase", marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${BRAND.accentMuted}` }}>
+              {/* Category header — uses BRAND.patronFont (Piece 12-2) */}
+              <h2 style={{ fontFamily: BRAND.patronFont, fontSize: 13, fontWeight: 600, letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase", marginBottom: 12, paddingBottom: 8, borderBottom: `1px solid ${BRAND.accentMuted}` }}>
                 {catName}
               </h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1002,6 +951,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                   return (
                     <div key={item.id} style={{ background: BRAND.cardBg, borderRadius: 14, padding: "14px 16px", border: totalInCart > 0 ? `1px solid ${BRAND.primary}44` : "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
                       <div style={{ flex: 1 }}>
+                        {/* Item name STAYS Oswald — repeated, scannable, legibility-critical */}
                         <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 500, letterSpacing: 1, marginBottom: 3 }}>{item.item_name}</div>
                         {item.description && <div style={{ fontSize: 12, color: BRAND.gray, fontWeight: 300 }}>{item.description}</div>}
                         <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 14, color: BRAND.accent, marginTop: 4 }}>${(item.price_cents / 100).toFixed(2)}</div>
@@ -1011,8 +961,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                           <>
                             <button
                               onClick={() => {
-                                // Remove the first cart entry for this item (simplest behavior).
-                                // If item has modifier variants, removes the first variant found.
                                 const firstEntry = cart.find((c) => c.id === item.id);
                                 if (firstEntry) removeFromCart(firstEntry.cartKey);
                               }}
@@ -1047,9 +995,7 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                 onClick={() => {
                   setShowAgeVerification(false);
                   setAgeVerified(true);
-                  // Store verification in session
                   sessionStorage.setItem(`waitless_age_verified_${venue.id}`, "true");
-                  // Proceed to checkout — skip age check since we just verified
                   setTimeout(() => handleCheckout(true), 100);
                 }}
                 style={{ padding: "16px", background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`, border: "none", borderRadius: 12, color: "#fff", fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}
@@ -1059,7 +1005,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
               <button
                 onClick={() => {
                   setShowAgeVerification(false);
-                  // Remove alcoholic items from cart
                   setCart((prev) => prev.filter((item) => item.station !== "bar"));
                   alert("Alcoholic items have been removed from your cart.");
                 }}
@@ -1138,7 +1083,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
               </div>
             ))}
 
-            {/* Item-level notes */}
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, color: BRAND.accent, textTransform: "uppercase", marginBottom: 8 }}>Special Instructions</div>
               <input
@@ -1163,7 +1107,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       {/* CART */}
       {view === "cart" && (
         <div style={{ padding: "0 20px 100px" }}>
-          <h2 style={{ fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600, letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase", marginBottom: 16, paddingBottom: 8, borderBottom: `1px solid ${BRAND.accentMuted}` }}>Your Order</h2>
+          {/* "Your Order" header — uses BRAND.patronFont (Piece 12-2) */}
+          <h2 style={{ fontFamily: BRAND.patronFont, fontSize: 13, fontWeight: 600, letterSpacing: 4, color: BRAND.accent, textTransform: "uppercase", marginBottom: 16, paddingBottom: 8, borderBottom: `1px solid ${BRAND.accentMuted}` }}>Your Order</h2>
           {cart.length === 0 ? (
             <p style={{ color: BRAND.gray, fontSize: 14, textAlign: "center", marginTop: 40 }}>Your order is empty</p>
           ) : (
@@ -1194,7 +1139,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                 </div>
               ))}
 
-              {/* Order-level special instructions */}
               <div style={{ marginTop: 12, marginBottom: 12 }}>
                 <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 6 }}>Order notes (optional)</div>
                 <input
@@ -1214,7 +1158,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
                   <span>Service fee ({venue.service_fee_percent}%)</span><span style={{ fontFamily: "'Space Mono', monospace" }}>${(feeCents / 100).toFixed(2)}</span>
                 </div>
 
-                {/* Tip selector */}
                 <div style={{ margin: "16px 0 12px" }}>
                   <div style={{ fontSize: 13, color: BRAND.gray, marginBottom: 10 }}>Add a tip</div>
                   <div style={{ display: "flex", gap: 8 }}>
@@ -1286,7 +1229,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
 
             
 
-              {/* Square card input — only show when Square is configured */}
               {!isDemoMode && (
                 <>
                   <div id="card-container" style={{ marginBottom: 16, minHeight: 50 }} />
@@ -1329,7 +1271,8 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       {/* CONFIRMATION */}
       {view === "confirmation" && activeOrders.length > 0 && currentOrder && (
         <div style={{ padding: "30px 20px", display: "flex", flexDirection: "column", alignItems: "center", gap: 28, minHeight: "60vh", justifyContent: "center" }}>
-          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 20 : 13, fontWeight: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 700 : 600, letterSpacing: 4, color: currentOrder.status === "ready" ? BRAND.success : currentOrder.status === "picked_up" ? BRAND.accent : currentOrder.status === "in_progress" ? BRAND.accent : BRAND.success, textTransform: "uppercase", textAlign: "center", transition: "all 0.5s ease" }}>
+          {/* Confirmation status text — uses BRAND.patronFont (Piece 12-2) */}
+          <div style={{ fontFamily: BRAND.patronFont, fontSize: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 20 : 13, fontWeight: currentOrder.status === "ready" || currentOrder.status === "picked_up" ? 700 : 600, letterSpacing: 4, color: currentOrder.status === "ready" ? BRAND.success : currentOrder.status === "picked_up" ? BRAND.accent : currentOrder.status === "in_progress" ? BRAND.accent : BRAND.success, textTransform: "uppercase", textAlign: "center", transition: "all 0.5s ease" }}>
             {currentOrder.status === "ready" ? "YOUR ORDER IS READY" : currentOrder.status === "picked_up" ? "ORDER COMPLETE" : currentOrder.status === "in_progress" ? "PREPARING YOUR ORDER" : "Order Confirmed"}
           </div>
 
@@ -1359,12 +1302,10 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             status={currentOrder.status}
           />
 
-          {/* Queue estimate — only show when order is not ready */}
           {currentOrder.status !== "ready" && currentOrder.status !== "picked_up" && (
             <QueueEstimate venueId={venue.id} orderId={currentOrder.id} orderedAt={currentOrder.ordered_at} BRAND={BRAND} />
           )}
 
-          {/* Order items for current badge */}
           <div style={{ maxWidth: 280, width: "100%" }}>
             {(currentOrder.items || []).map((item, idx) => (
               <div key={idx} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", fontSize: 13, color: BRAND.gray }}>
@@ -1374,7 +1315,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
             ))}
           </div>
 
-          {/* Swipe dots — only show if multiple orders */}
           {activeOrders.length > 1 && (
             <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
               <button
@@ -1427,7 +1367,6 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
         </div>
       )}
 
-      {/* PWA Install Prompt */}
       <InstallPrompt BRAND={BRAND} />
     </div>
   );
@@ -1464,7 +1403,7 @@ function SquareCardLoader({ venue }) {
 }
 
 // ============================================
-// BARTENDER VIEW
+// BARTENDER VIEW (staff — stays Oswald entirely)
 // ============================================
 
 const STATUS_CONFIG = {
@@ -1481,7 +1420,6 @@ function BartenderView({ venue, BRAND }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [verifyOrder, setVerifyOrder] = useState(null);
 
-  // PIN submit
   const handlePinCheck = async (fullPin) => {
     const valid = await verifyBartenderPin(venue.id, fullPin);
     if (valid) {
@@ -1493,7 +1431,6 @@ function BartenderView({ venue, BRAND }) {
     }
   };
 
-  // Subscribe to queue
   useEffect(() => {
     if (!authenticated) return;
     const unsub = subscribeToBartenderQueue(venue.id, (updatedOrders) => {
@@ -1502,7 +1439,6 @@ function BartenderView({ venue, BRAND }) {
     return unsub;
   }, [authenticated, venue.id]);
 
-  // ---- PIN SCREEN ----
   if (!authenticated) {
     return (
       <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 24 }}>
@@ -1520,7 +1456,6 @@ function BartenderView({ venue, BRAND }) {
             Enter the bartender PIN to access the queue.
           </p>
 
-          {/* PIN dots */}
           <div style={{ display: "flex", gap: 12, margin: "8px 0" }}>
             {[0, 1, 2, 3].map((i) => (
               <div
@@ -1541,7 +1476,6 @@ function BartenderView({ venue, BRAND }) {
             </div>
           )}
 
-          {/* Number pad */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, width: "100%" }}>
             {[1, 2, 3, 4, 5, 6, 7, 8, 9, null, 0, "del"].map((key, idx) => (
               <button
@@ -1582,7 +1516,6 @@ function BartenderView({ venue, BRAND }) {
     );
   }
 
-  // ---- QUEUE ----
   const counts = {
     all: orders.length,
     pending: orders.filter((o) => o.status === "pending").length,
@@ -1600,7 +1533,6 @@ function BartenderView({ venue, BRAND }) {
 
   return (
     <div>
-      {/* Bartender mode bar */}
       <div style={{ position: "sticky", top: 0, zIndex: 100, background: BRAND.accent + "15", borderBottom: `1px solid ${BRAND.accent}33`, padding: "8px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 8, height: 8, borderRadius: "50%", background: BRAND.accent }} />
@@ -1611,7 +1543,6 @@ function BartenderView({ venue, BRAND }) {
         </button>
       </div>
 
-      {/* Header */}
       <div style={{ position: "sticky", top: 36, zIndex: 90, background: BRAND.black, borderBottom: "1px solid #1a1a1a", padding: "12px 20px 16px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <div>
@@ -1625,7 +1556,6 @@ function BartenderView({ venue, BRAND }) {
           </div>
         </div>
 
-        {/* Filter tabs */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {[{ key: "all", label: "All" }, { key: "pending", label: "Queued" }, { key: "in_progress", label: "Making" }, { key: "ready", label: "Ready" }].map((tab) => (
             <button key={tab.key} onClick={() => setFilterStatus(tab.key)} style={{ padding: "7px 14px", borderRadius: 20, border: filterStatus === tab.key ? `1px solid ${BRAND.primary}` : "1px solid #333", background: filterStatus === tab.key ? BRAND.primary + "22" : "transparent", color: filterStatus === tab.key ? BRAND.primary : BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 500, letterSpacing: 1, cursor: "pointer", display: "flex", alignItems: "center", gap: 5 }}>
@@ -1636,13 +1566,11 @@ function BartenderView({ venue, BRAND }) {
         </div>
       </div>
 
-      {/* Order cards */}
       <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
         {sorted.map((order) => {
           const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
           return (
             <div key={order.id} style={{ background: config.bg, borderRadius: 16, border: `1.5px solid ${config.border}`, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 12 }}>
-              {/* Top row */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
                   <div style={{ width: 50, height: 50, borderRadius: 10, background: `radial-gradient(circle, ${order.confirm_hex}22, ${BRAND.darkGray})`, border: `2px solid ${order.confirm_hex}`, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: `0 0 12px ${order.confirm_hex}44` }}>
@@ -1656,13 +1584,11 @@ function BartenderView({ venue, BRAND }) {
                 <div style={{ padding: "5px 12px", borderRadius: 20, background: config.accent + "22", border: `1px solid ${config.accent}44`, fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: config.accent, letterSpacing: 2 }}>{config.label}</div>
               </div>
 
-              {/* Items with modifiers and station status */}
               {(order.items || []).map((item, idx) => {
                 const itemStatus = order.item_statuses?.[idx] || (order.status === "pending" ? "pending" : "pending");
                 const isItemReady = itemStatus === "ready";
                 return (
                   <div key={idx} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {/* Item ready indicator */}
                     {order.status === "in_progress" && (
                       <span style={{ fontSize: 10, color: isItemReady ? BRAND.success : "#444" }}>{isItemReady ? "✓" : "○"}</span>
                     )}
@@ -1691,7 +1617,6 @@ function BartenderView({ venue, BRAND }) {
                 );
               })}
 
-              {/* Order-level special instructions */}
               {order.special_instructions && (
                 <div style={{ padding: "8px 10px", background: BRAND.accent + "11", borderRadius: 6, border: `1px solid ${BRAND.accent}22` }}>
                   <span style={{ fontSize: 10, fontFamily: "'Space Mono', monospace", color: BRAND.accent, letterSpacing: 1 }}>NOTE: </span>
@@ -1699,7 +1624,6 @@ function BartenderView({ venue, BRAND }) {
                 </div>
               )}
 
-              {/* Ready timestamp */}
               {order.status === "ready" && order.ready_at && (
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", background: "#0a1a1022", borderRadius: 6, border: `1px solid ${BRAND.success}22` }}>
                   <span style={{ fontSize: 11, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>READY SINCE</span>
@@ -1707,7 +1631,6 @@ function BartenderView({ venue, BRAND }) {
                 </div>
               )}
 
-              {/* Actions */}
               <div style={{ display: "flex", gap: 10 }}>
                 {order.status === "pending" && (
                   <button onClick={() => startMakingOrder(order.id)} style={{ flex: 1, padding: "13px", background: BRAND.accent, border: "none", borderRadius: 10, color: BRAND.black, fontFamily: "'Oswald', sans-serif", fontSize: 15, fontWeight: 700, letterSpacing: 2, cursor: "pointer" }}>START MAKING</button>
@@ -1742,7 +1665,6 @@ function BartenderView({ venue, BRAND }) {
         )}
       </div>
 
-      {/* Verify Modal */}
       {verifyOrder && (
         <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.88)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: BRAND.darkGray, borderRadius: 24, padding: "36px 28px", maxWidth: 380, width: "100%", display: "flex", flexDirection: "column", alignItems: "center", gap: 20, border: "1px solid #333" }}>
@@ -1756,7 +1678,6 @@ function BartenderView({ venue, BRAND }) {
               size={140}
             />
 
-            {/* Timestamps */}
             <div style={{ width: "100%", background: BRAND.black, borderRadius: 12, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 10, fontFamily: "'Space Mono', monospace", color: BRAND.dimText }}>ORDERED</span>
@@ -1791,7 +1712,7 @@ function BartenderView({ venue, BRAND }) {
 }
 
 // ============================================
-// KITCHEN DISPLAY (read-only, large text)
+// KITCHEN DISPLAY (staff — stays Oswald entirely)
 // ============================================
 function KitchenDisplay({ venue, BRAND, stationFilter }) {
   const [orders, setOrders] = useState([]);
@@ -1804,11 +1725,9 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
     return () => unsub();
   }, [venue.id]);
 
-  // Filter orders to only those that have items for this station
   const filteredOrders = orders
     .filter((o) => o.status === "in_progress")
     .map((order) => {
-      // Find which items belong to this station
       const stationItems = (order.items || []).map((item, idx) => ({ ...item, _idx: idx }))
         .filter((item) => {
           if (!stationFilter) return true;
@@ -1825,7 +1744,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#000", padding: 16 }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, padding: "10px 16px", background: "#0a0a0a", borderRadius: 10, border: "1px solid #1a1a1a" }}>
         <div>
           <span style={{ fontFamily: "'Oswald', sans-serif", fontSize: 20, fontWeight: 700, letterSpacing: 3, color: "#f5f5f5" }}>{venue.name?.toUpperCase()}</span>
@@ -1837,7 +1755,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
         </div>
       </div>
 
-      {/* Orders grid */}
       {filteredOrders.length === 0 ? (
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", minHeight: "60vh" }}>
           <div style={{ textAlign: "center" }}>
@@ -1852,7 +1769,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
               background: "#0a0a0a", borderRadius: 14, border: `2px solid ${accentColor}44`,
               padding: 16, display: "flex", flexDirection: "column", gap: 10,
             }}>
-              {/* Order header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <div style={{
@@ -1871,7 +1787,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
                 <WaitTimer since={order.ordered_at} />
               </div>
 
-              {/* Station items — BIG TEXT with per-item READY */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {order.stationItems.map((item) => {
                   const itemStatus = order.item_statuses?.[item._idx] || "pending";
@@ -1905,7 +1820,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
                           )}
                         </div>
 
-                        {/* Per-item READY button */}
                         {!isItemReady && (
                           <button
                             onClick={async () => {
@@ -1933,7 +1847,6 @@ function KitchenDisplay({ venue, BRAND, stationFilter }) {
                 })}
               </div>
 
-              {/* Order-level special instructions */}
               {order.special_instructions && (
                 <div style={{ padding: "10px 12px", background: "#e74c3c22", borderRadius: 8, border: "2px solid #e74c3c66" }}>
                   <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#e74c3c", letterSpacing: 2 }}>NOTE: </span>

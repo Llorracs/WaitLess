@@ -1128,12 +1128,28 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND }) {
           onChange={(e) => setForm({ ...form, patron_font: e.target.value })}
           style={S.select}
         >
-          <option value="Inter">Inter — Clean & universally legible (default)</option>
-          <option value="Space Grotesk">Space Grotesk — Modern with character</option>
-          <option value="Montserrat">Montserrat — Friendly geometric</option>
-          <option value="Oswald">Oswald — Bold condensed display</option>
-          <option value="Playfair Display">Playfair Display — Elegant serif</option>
-          <option value="Bebas Neue">Bebas Neue — All-caps display</option>
+          <optgroup label="Clean & Modern">
+            <option value="Inter">Inter — Universally legible (default)</option>
+            <option value="Space Grotesk">Space Grotesk — Modern with character</option>
+            <option value="Montserrat">Montserrat — Friendly geometric</option>
+          </optgroup>
+          <optgroup label="Bold Display">
+            <option value="Oswald">Oswald — Bold condensed</option>
+            <option value="Bebas Neue">Bebas Neue — All-caps display</option>
+            <option value="Bungee">Bungee — Chunky street signage</option>
+          </optgroup>
+          <optgroup label="Vintage & Handcrafted">
+            <option value="Rye">Rye — Western saloon</option>
+            <option value="Special Elite">Special Elite — Vintage typewriter</option>
+            <option value="Caveat">Caveat — Handwritten</option>
+          </optgroup>
+          <optgroup label="Elegant & Refined">
+            <option value="Playfair Display">Playfair Display — Editorial serif</option>
+            <option value="Cinzel">Cinzel — Roman inscription</option>
+          </optgroup>
+          <optgroup label="Futuristic">
+            <option value="Audiowide">Audiowide — Retro-futurism</option>
+          </optgroup>
         </select>
         <p style={{ fontSize: 11, color: "#666", margin: "6px 0 0", lineHeight: 1.5 }}>
           Used for your venue name + section headers on patron-facing pages (menu, ticket buy, confirmation). Item names and prices stay readable regardless of choice.

@@ -20,6 +20,25 @@
  * The actual conversion of pending → paid (and creation of individual tickets)
  * happens in ticket-webhook.js, triggered by Square's payment.updated event.
  *
+ * MAY 26 2026 TOKEN-REFRESH FIX:
+ *   Square OAuth access tokens expire after 30 days. Previously the venue's
+ *   access token was used statically with no refresh, so when it expired
+ *   every checkout creation returned 401 UNAUTHORIZED and the only fix was a
+ *   manual reconnect. We now load the venue's refresh token too, and if the
+ *   createPaymentLink call returns 401, we refresh the access token via
+ *   Square's /oauth2/token endpoint, save the new token back to the venue
+ *   row, and retry the checkout once. Buyers never see the failure and the
+ *   system self-heals for every venue.
+ *
+ *   PREREQUISITES (must be in place for this to work):
+ *     - venues table has columns: square_refresh_token, square_token_expires_at
+ *     - square-oauth-callback.js persists refresh_token + expires_at on connect
+ *     - Env vars SQUARE_APP_ID + SQUARE_APP_SECRET are set (already used by the
+ *       OAuth callback — required here for the refresh grant)
+ *     - The venue has reconnected Square AFTER the callback patch shipped, so a
+ *       refresh token actually exists in its row. If square_refresh_token is
+ *       null, refresh cannot happen and a manual reconnect is still required.
+ *
  * MAY 14 2026 PHONE NORMALIZATION FIX:
  *   Square's CreatePaymentLink requires phone in strict E.164 format
  *   (e.g. "+15555551234"). Buyers entering bare 10-digit US numbers like
@@ -76,6 +95,10 @@ const SQUARE_ONLINE_FIXED_C = 30;     // 30 cents per transaction
 // src/LegalPages.jsx. When the policy is updated, BOTH must change in lockstep.
 const ACCEPTED_TERMS_VERSIONS = ["2026.05.12"];
 
+// Square API version pinned for direct (non-SDK) calls like the token refresh.
+// Keep this aligned with the version the SDK negotiates.
+const SQUARE_API_VERSION = "2024-07-17";
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -101,6 +124,117 @@ function ok(payload) {
     headers: CORS_HEADERS,
     body: JSON.stringify({ success: true, ...payload }),
   };
+}
+
+/**
+ * Detect whether a thrown Square SDK error is specifically a 401 auth failure
+ * (expired/revoked access token) as opposed to any other rejection.
+ *
+ * The SDK error carries statusCode, and the body carries an errors[] array
+ * with category AUTHENTICATION_ERROR / code UNAUTHORIZED. We check both
+ * defensively because the shape can vary slightly between SDK versions.
+ */
+function isSquareAuthError(squareError) {
+  if (!squareError) return false;
+  if (squareError.statusCode === 401) return true;
+  const errors =
+    squareError.result?.errors || squareError.errors || [];
+  return errors.some(
+    (e) =>
+      e?.category === "AUTHENTICATION_ERROR" || e?.code === "UNAUTHORIZED"
+  );
+}
+
+/**
+ * Refresh a venue's Square access token using its stored refresh token.
+ *
+ * Calls Square's OAuth token endpoint with grant_type=refresh_token, then
+ * persists the new access_token (+ refresh_token + expires_at if Square
+ * rotates them) back to the venue row so future calls use the fresh token.
+ *
+ * Returns the new access token string on success, or null on failure
+ * (no refresh token stored, Square rejected the refresh, save failed, etc.).
+ * A null return means the caller must surface a "reconnect Square" error —
+ * there is no automated recovery once the refresh token itself is dead.
+ */
+async function refreshSquareToken(venue) {
+  if (!venue.square_refresh_token) {
+    console.error(
+      `Cannot refresh: venue ${venue.id} has no square_refresh_token. ` +
+        `Venue must reconnect Square manually.`
+    );
+    return null;
+  }
+  if (!process.env.SQUARE_APP_ID || !process.env.SQUARE_APP_SECRET) {
+    console.error(
+      "Cannot refresh: SQUARE_APP_ID / SQUARE_APP_SECRET env vars missing."
+    );
+    return null;
+  }
+
+  try {
+    const resp = await fetch("https://connect.squareup.com/oauth2/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Square-Version": SQUARE_API_VERSION,
+      },
+      body: JSON.stringify({
+        client_id: process.env.SQUARE_APP_ID,
+        client_secret: process.env.SQUARE_APP_SECRET,
+        grant_type: "refresh_token",
+        refresh_token: venue.square_refresh_token,
+      }),
+    });
+
+    const data = await resp.json();
+
+    if (!resp.ok || !data.access_token) {
+      // Most common cause: the refresh token itself has expired or been
+      // revoked. The merchant must reconnect via /{slug}/admin → Payments.
+      console.error("Square token refresh failed:", data);
+      return null;
+    }
+
+    // Persist the rotated credentials. Square may or may not return a new
+    // refresh_token; only overwrite it if present.
+    const update = {
+      square_access_token: data.access_token,
+    };
+    if (data.refresh_token) update.square_refresh_token = data.refresh_token;
+    if (data.expires_at) update.square_token_expires_at = data.expires_at;
+
+    const { error: saveErr } = await supabase
+      .from("venues")
+      .update(update)
+      .eq("id", venue.id);
+
+    if (saveErr) {
+      // The refresh succeeded with Square but we failed to save it. The token
+      // still works for this request, so return it — but log loudly, because
+      // next invocation will use the stale token from the DB and refresh again.
+      console.error("Refreshed token but failed to save to venue row:", saveErr);
+    }
+
+    return data.access_token;
+  } catch (e) {
+    console.error("Unexpected error during Square token refresh:", e);
+    return null;
+  }
+}
+
+/**
+ * Build a Square client for a venue given an explicit access token.
+ * Pulled out so we can rebuild the client with a refreshed token on retry.
+ */
+function buildSquareClient(venue, accessToken) {
+  return new Client({
+    accessToken,
+    environment:
+      venue.square_environment === "production"
+        ? Environment.Production
+        : Environment.Sandbox,
+  });
 }
 
 /**
@@ -239,10 +373,15 @@ exports.handler = async (event) => {
 
   // -------------------------------------------------------------------------
   // 2. Look up venue and validate Square config
+  //
+  // CHANGED (May 26 2026): now also selects square_refresh_token and
+  // square_token_expires_at so we can refresh an expired access token on 401.
   // -------------------------------------------------------------------------
   const { data: venue, error: venueErr } = await supabase
     .from("venues")
-    .select("id, name, slug, square_access_token, square_location_id, square_environment, currency")
+    .select(
+      "id, name, slug, square_access_token, square_refresh_token, square_token_expires_at, square_location_id, square_environment, currency"
+    )
     .eq("slug", venueSlug)
     .eq("is_active", true)
     .single();
@@ -383,15 +522,13 @@ exports.handler = async (event) => {
 
   // -------------------------------------------------------------------------
   // 8. Create the Square hosted checkout link
+  //
+  // CHANGED (May 26 2026): wrapped in a refresh-on-401 retry. We attempt the
+  // checkout with the stored access token; if Square rejects it as an auth
+  // failure (expired/revoked token), we refresh via the stored refresh token,
+  // rebuild the client, and retry exactly once. Any other error, or a second
+  // failure, falls through to the failure handler unchanged.
   // -------------------------------------------------------------------------
-  const squareClient = new Client({
-    accessToken: venue.square_access_token,
-    environment:
-      venue.square_environment === "production"
-        ? Environment.Production
-        : Environment.Sandbox,
-  });
-
   const siteUrl = process.env.URL || "https://waitlss.netlify.app";
   const redirectUrl = `${siteUrl}/${venue.slug}/buy/${eventRow.slug}/confirmation?order_id=${order.id}`;
 
@@ -405,67 +542,111 @@ exports.handler = async (event) => {
     prePopulatedData.buyerPhoneNumber = phoneE164;
   }
 
-  try {
-    const paymentLinkResp = await squareClient.checkoutApi.createPaymentLink({
-      idempotencyKey: `ticket-order-${order.id}`,
-      order: {
-        locationId: venue.square_location_id,
-        referenceId: order.id,
-        lineItems,
+  const checkoutRequest = {
+    idempotencyKey: `ticket-order-${order.id}`,
+    order: {
+      locationId: venue.square_location_id,
+      referenceId: order.id,
+      lineItems,
+    },
+    checkoutOptions: {
+      redirectUrl,
+      askForShippingAddress: false,
+      merchantSupportEmail: undefined,
+      acceptedPaymentMethods: {
+        applePay: true,
+        googlePay: true,
+        cashAppPay: true,
+        afterpayClearpay: false,
       },
-      checkoutOptions: {
-        redirectUrl,
-        askForShippingAddress: false,
-        merchantSupportEmail: undefined,
-        acceptedPaymentMethods: {
-          applePay: true,
-          googlePay: true,
-          cashAppPay: true,
-          afterpayClearpay: false,
+    },
+    prePopulatedData,
+  };
+
+  // Attempt the checkout, refreshing the token once on a 401.
+  let accessToken = venue.square_access_token;
+  let squareClient = buildSquareClient(venue, accessToken);
+  let attemptedRefresh = false;
+
+  while (true) {
+    try {
+      const paymentLinkResp = await squareClient.checkoutApi.createPaymentLink(
+        checkoutRequest
+      );
+
+      const paymentLink = paymentLinkResp.result?.paymentLink;
+      if (!paymentLink?.url) {
+        throw new Error("Square returned no payment link");
+      }
+
+      await supabase
+        .from("ticket_orders")
+        .update({
+          square_checkout_id: paymentLink.id,
+          square_order_id: paymentLink.orderId || null,
+        })
+        .eq("id", order.id);
+
+      return ok({
+        orderId: order.id,
+        checkoutUrl: paymentLink.url,
+        totals: {
+          faceCents: totals.faceCents,
+          processingCents: totals.processingCents,
+          totalCents: totals.totalCents,
         },
-      },
-      prePopulatedData,
-    });
-
-    const paymentLink = paymentLinkResp.result?.paymentLink;
-    if (!paymentLink?.url) {
-      throw new Error("Square returned no payment link");
-    }
-
-    await supabase
-      .from("ticket_orders")
-      .update({
-        square_checkout_id: paymentLink.id,
-        square_order_id: paymentLink.orderId || null,
-      })
-      .eq("id", order.id);
-
-    return ok({
-      orderId: order.id,
-      checkoutUrl: paymentLink.url,
-      totals: {
-        faceCents: totals.faceCents,
-        processingCents: totals.processingCents,
-        totalCents: totals.totalCents,
-      },
-    });
-  } catch (squareError) {
-    console.error("Square createPaymentLink error:", squareError);
-
-    await supabase
-      .from("ticket_orders")
-      .update({ status: "failed" })
-      .eq("id", order.id);
-
-    if (squareError.result?.errors) {
-      return err(400, "Square checkout creation failed", {
-        details: squareError.result.errors.map((e) => ({
-          code: e.code,
-          detail: e.detail,
-          field: e.field,
-        })),
       });
+    } catch (squareError) {
+      // If this is an auth failure and we haven't already tried refreshing,
+      // attempt a token refresh and retry the checkout once.
+      if (isSquareAuthError(squareError) && !attemptedRefresh) {
+        attemptedRefresh = true;
+        console.warn(
+          `Square 401 for venue ${venue.id}; attempting token refresh and retry.`
+        );
+
+        const newToken = await refreshSquareToken(venue);
+        if (newToken) {
+          accessToken = newToken;
+          squareClient = buildSquareClient(venue, accessToken);
+          continue; // retry the while-loop once with the fresh token
+        }
+
+        // Refresh failed — the refresh token is dead or missing. The merchant
+        // must reconnect Square. Mark the order failed and tell the buyer.
+        console.error(
+          `Token refresh failed for venue ${venue.id}; manual reconnect required.`
+        );
+        await supabase
+          .from("ticket_orders")
+          .update({ status: "failed" })
+          .eq("id", order.id);
+
+        return err(
+          503,
+          "This venue's payment connection needs to be re-authorized. Please contact the organizer.",
+          { code: "SQUARE_REAUTH_REQUIRED" }
+        );
+      }
+
+      // Non-auth error, or a second failure after refresh — original behavior.
+      console.error("Square createPaymentLink error:", squareError);
+
+      await supabase
+        .from("ticket_orders")
+        .update({ status: "failed" })
+        .eq("id", order.id);
+
+      if (squareError.result?.errors) {
+        return err(400, "Square checkout creation failed", {
+          details: squareError.result.errors.map((e) => ({
+            code: e.code,
+            detail: e.detail,
+            field: e.field,
+          })),
+        });
+      }
+      return err(500, "Could not create Square checkout link");
     }
-    return err(500, "Could not create Square checkout link");
   }
 };

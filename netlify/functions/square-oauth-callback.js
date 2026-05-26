@@ -94,7 +94,7 @@ exports.handler = async (event) => {
 
     // Use the first active location (or the main one)
     const primaryLocation = locations.find(l => l.status === 'ACTIVE') || locations[0];
-    const locationId = primaryLocation?.id;
+    const locationId = primaryLocation?.id;square_app_id: process.env.SQUARE_APP_ID
 
     if (!locationId) {
       console.error('No active locations found for merchant');
@@ -108,9 +108,11 @@ exports.handler = async (event) => {
       .update({
         square_app_id: process.env.SQUARE_APP_ID,
         square_access_token: access_token,
+        square_refresh_token: refresh_token,
+        square_token_expires_at: expires_at,
         square_location_id: locationId,
         square_environment: 'production',
-        square_merchant_id: merchant_id, // <-- NEW
+        square_merchant_id: merchant_id,
       })
       .eq('id', venueId);
 

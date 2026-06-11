@@ -6,49 +6,31 @@
  *
  * Path: netlify/functions/ticket-webhook.js
  *
- * CHANGE FROM v4 (PER-VENUE SIGNATURE KEY LOOKUP):
- *   v4 verified all webhook signatures using a SINGLE platform-level
- *   env var: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY.
+ * CHANGE FROM v5 (QR RENDERING FIX):
+ *   v5 generated QR codes as base64 data URIs using the `qrcode` npm package.
+ *   Gmail and Outlook block data: URIs in email images, so QR codes were
+ *   invisible to most ticket buyers.
  *
- *   That worked while TRFQ was the only Square-connected venue, because
- *   the platform-level key happened to match TRFQ's webhook signing key.
- *   The moment a SECOND venue connects Square with their own webhook
- *   subscription, their events would be signed with a DIFFERENT key and
- *   signature verification would fail — silent ticket loss.
+ *   This patch replaces data URI generation with qrserver.com hosted URLs:
+ *     https://api.qrserver.com/v1/create-qr-code/?data=WL-trfq-...&size=300x300
  *
- *   v5 looks up the per-venue signing key from venues.square_webhook_signature_key
- *   BEFORE verifying the signature. The flow:
+ *   The URL is a real HTTPS image — every email client renders it correctly.
+ *   No API key required. No other logic changed.
  *
- *     1. Parse raw body as JSON (no trust yet — body could be forged)
- *     2. Extract merchant_id from the (still untrusted) body
- *     3. DB read-only lookup: find the venue by merchant_id
- *        → read square_webhook_signature_key from that row
- *     4. Verify the request signature using THAT venue's key
- *     5. If verification fails: 401, no side effects
- *     6. From here on: payload is trusted, venue is loaded
- *
- *   An attacker can spoof merchant_id all day, but without the venue's
- *   actual signing key they cannot forge a valid HMAC for the request body.
- *   So step 4 still gates everything that mutates state.
- *
- *   Side effect of v5: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY is no
- *   longer read. It can be deleted from Netlify env vars after this deploys
- *   cleanly and a real TRFQ webhook event is verified successfully.
- *
- * UNCHANGED FROM v4:
- *   - 3-step lookup chain (reference_id → square_order_id → API fallback)
+ * UNCHANGED FROM v5:
+ *   - Per-venue signature key lookup
+ *   - 3-step order lookup chain (reference_id → square_order_id → API fallback)
  *   - price_paid_cents capture per ticket
  *   - Idempotency (Already processed / terminal state guards)
  *   - Oversold detection with status='failed' flag
  *   - quantity_sold increment per ticket type
  *   - Email composition via Resend
- *   - QR token generation and rendering
+ *   - QR token generation
  * ============================================
  */
 
 const { createClient } = require("@supabase/supabase-js");
 const crypto = require("crypto");
-const QRCode = require("qrcode");
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
@@ -88,13 +70,12 @@ function generateQrToken(venueSlug) {
   return `WL-${venueSlug}-${random}`;
 }
 
-async function renderQrDataUrl(token) {
-  return QRCode.toDataURL(token, {
-    width: 300,
-    margin: 2,
-    errorCorrectionLevel: "M",
-    color: { dark: "#0a0a0a", light: "#ffffff" },
-  });
+/**
+ * Returns a hosted QR code URL instead of a base64 data URI.
+ * Gmail and Outlook block data: URIs — this URL renders in every client.
+ */
+function buildQrUrl(token) {
+  return `https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(token)}&size=300x300&color=0a0a0a&bgcolor=ffffff`;
 }
 
 // ============================================================================
@@ -111,7 +92,7 @@ function escapeHtml(s) {
     .replace(/'/g, "&#39;");
 }
 
-function buildTicketEmail({ venue, event, order, tickets, qrDataUrls }) {
+function buildTicketEmail({ venue, event, order, tickets, qrUrls }) {
   const venuePrimary = venue.brand_colors?.primary || "#e91e8c";
   const venueAccent = venue.brand_colors?.accent || "#d4a843";
 
@@ -137,7 +118,7 @@ function buildTicketEmail({ venue, event, order, tickets, qrDataUrls }) {
             <div style="font-family: 'Oswald', Helvetica, Arial, sans-serif; font-size: 14px; color: #666; margin-bottom: 16px;">
               Ticket ${i + 1} of ${tickets.length}
             </div>
-            <img src="${qrDataUrls[i]}" alt="Ticket QR Code" width="240" height="240" style="display: block; margin: 0 auto; border: none;" />
+            <img src="${qrUrls[i]}" alt="Ticket QR Code" width="240" height="240" style="display: block; margin: 0 auto; border: none;" />
             <div style="font-family: 'Space Mono', 'Courier New', monospace; font-size: 11px; color: #999; letter-spacing: 1px; margin-top: 12px; word-break: break-all;">
               ${escapeHtml(ticket.qr_token)}
             </div>
@@ -291,21 +272,6 @@ exports.handler = async (event) => {
 
   const notificationUrl = `${process.env.URL || "https://waitless.events"}/.netlify/functions/ticket-webhook`;
 
-  // ==========================================================================
-  // CHANGE FROM v4: PER-VENUE SIGNATURE KEY LOOKUP
-  //
-  // We can't verify the signature until we know which venue this webhook is
-  // for — different venues have different signing keys. The merchant_id
-  // lives in the JSON body, but we shouldn't trust the body before we've
-  // verified it.
-  //
-  // The escape hatch: parse merchant_id ONLY, do a single read-only DB
-  // lookup, then verify the signature with THAT venue's stored signature
-  // key. If verification fails, the request is rejected before any side
-  // effect runs. An attacker spoofing merchant_id cannot forge a valid HMAC
-  // without the venue's actual signature key.
-  // ==========================================================================
-
   // Step 1: parse JSON body — without trusting it yet
   let payload;
   try {
@@ -321,8 +287,7 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "No merchant_id" };
   }
 
-  // Step 3: read-only DB lookup — find venue by merchant_id, fetch their
-  // signature key along with everything else we'll need downstream
+  // Step 3: read-only DB lookup — find venue by merchant_id
   const { data: venue, error: venueErr } = await supabase
     .from("venues")
     .select("id, slug, name, brand_colors, square_access_token, square_environment, square_merchant_id, square_webhook_signature_key")
@@ -347,11 +312,6 @@ exports.handler = async (event) => {
     return { statusCode: 401, body: "Invalid signature" };
   }
 
-  // ==========================================================================
-  // From here on: payload is trusted, venue is loaded, signature verified
-  // with the correct per-venue key. v4 logic continues unchanged.
-  // ==========================================================================
-
   if (payload.type !== "payment.updated") {
     return { statusCode: 200, body: "Ignored — not a payment event" };
   }
@@ -364,25 +324,6 @@ exports.handler = async (event) => {
   if (payment.status !== "COMPLETED") {
     return { statusCode: 200, body: `Ignored — payment status is ${payment.status}` };
   }
-
-  // ==========================================================================
-  // FROM v4: Find our ticket_orders row via a 3-step lookup chain.
-  //
-  // Square hosted checkout (CreatePaymentLink) does NOT propagate the
-  // reference_id from the parent Order onto the Payment object. So
-  // payment.reference_id is typically NULL for hosted checkout flows.
-  // The reference_id is stored on the Square Order; we have to either:
-  //   (a) match by our stored square_order_id (fast, requires the column to
-  //       have been saved correctly by create-ticket-checkout.js), or
-  //   (b) fetch the Square Order via API and read referenceId from there.
-  //
-  // We try in this order:
-  //   Step 1: payment.reference_id directly (handles Web Payments SDK flows)
-  //   Step 2: payment.order_id → match our ticket_orders.square_order_id
-  //   Step 3: payment.order_id → Square API → Order.reference_id → match by id
-  //
-  // Step 2 is the fast path for hosted checkout. Step 3 is defense in depth.
-  // ==========================================================================
 
   let order = null;
   let orderId = payment.reference_id || payment.referenceId || payment.order?.referenceId;
@@ -398,9 +339,7 @@ exports.handler = async (event) => {
     if (orderByRef) order = orderByRef;
   }
 
-  // Step 2: fallback to lookup by square_order_id (hosted checkout case —
-  // we saved square_order_id in create-ticket-checkout.js after creating the
-  // payment link)
+  // Step 2: fallback to lookup by square_order_id (hosted checkout case)
   if (!order && squareOrderId) {
     const { data: orderByOrderId } = await supabase
       .from("ticket_orders")
@@ -414,8 +353,6 @@ exports.handler = async (event) => {
   }
 
   // Step 3: last resort — fetch the Square Order via API and read referenceId
-  // (handles cases where create-ticket-checkout.js failed to save
-  // square_order_id, but we can still recover by asking Square)
   if (!order && squareOrderId && venue.square_access_token) {
     try {
       const baseUrl = venue.square_environment === "production"
@@ -439,7 +376,6 @@ exports.handler = async (event) => {
           if (orderByApiRef) {
             order = orderByApiRef;
             orderId = order.id;
-            // Backfill square_order_id since we now know it
             await supabase
               .from("ticket_orders")
               .update({ square_order_id: squareOrderId })
@@ -480,11 +416,6 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "Event missing" };
   }
 
-  // ==========================================================================
-  // FROM v4: Use the squareOrderId we already have from the payment payload
-  // (above), falling back to order.square_order_id. v3 only checked
-  // order.square_order_id, which would fail if it never got saved.
-  // ==========================================================================
   let selections = [];
   const effectiveSquareOrderId = squareOrderId || order.square_order_id;
   if (effectiveSquareOrderId) {
@@ -500,7 +431,6 @@ exports.handler = async (event) => {
     return { statusCode: 200, body: "Selections lost" };
   }
 
-  // Load current ticket type prices — this is what we capture as price_paid_cents
   const ttIds = [...new Set(selections.map((s) => s.ticketTypeId))];
   const { data: ticketTypes } = await supabase
     .from("ticket_types")
@@ -533,7 +463,7 @@ exports.handler = async (event) => {
       .eq("id", sel.ticketTypeId);
   }
 
-  // Capture price_paid_cents per ticket
+  // Build tickets to insert
   const ticketsToInsert = [];
   for (const sel of selections) {
     const tt = ttById.get(sel.ticketTypeId);
@@ -578,16 +508,15 @@ exports.handler = async (event) => {
     _ticketType: ttById.get(t.ticket_type_id),
   }));
 
-  const qrDataUrls = await Promise.all(
-    ticketsWithType.map((t) => renderQrDataUrl(t.qr_token))
-  );
+  // Build hosted QR URLs — no base64, works in Gmail and Outlook
+  const qrUrls = ticketsWithType.map((t) => buildQrUrl(t.qr_token));
 
   const { html, text } = buildTicketEmail({
     venue,
     event: eventRow,
     order: { ...order, status: "paid" },
     tickets: ticketsWithType,
-    qrDataUrls,
+    qrUrls,
   });
 
   try {

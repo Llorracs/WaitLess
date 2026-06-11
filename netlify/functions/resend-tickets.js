@@ -6,32 +6,16 @@
  *
  * ONE-TIME USE — safe to delete after the event.
  *
- * Resends ticket confirmation emails with working QR codes (qrserver.com URLs
- * instead of base64 data URIs which Gmail and Outlook block).
+ * USAGE:
  *
- * USAGE — open in any browser after deploying:
+ *   Dry run (no emails sent):
+ *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026&event_id=UUID&dry=true
  *
- *   Dry run first (lists orders, sends NO emails):
- *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026&dry=true
+ *   Full resend for an event:
+ *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026&event_id=UUID
  *
- *   Live run (sends emails to all paid ticket holders for today's event):
- *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026
- *
- *   Target a specific event by ID (get the UUID from Supabase events table):
- *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026&event_id=YOUR-EVENT-UUID
- *
- * WHAT IT DOES:
- *   1. Finds all paid ticket_orders for today's event(s) at the given venue
- *   2. For each order, loads its tickets from the tickets table
- *   3. Rebuilds the confirmation email using qrserver.com QR URLs
- *   4. Sends via Resend (same from address as the original)
- *   5. Returns a JSON summary of every order processed
- *
- * DOES NOT MODIFY:
- *   - ticket_orders rows (no status changes)
- *   - tickets rows (no changes)
- *   - Any other tables
- * ============================================
+ *   Target specific orders only (comma-separated, no spaces):
+ *   https://waitless.events/.netlify/functions/resend-tickets?venue=trfq&secret=waitless-resend-2026&event_id=UUID&order_ids=id1,id2,id3
  */
 
 const { createClient } = require("@supabase/supabase-js");
@@ -44,6 +28,8 @@ const supabase = createClient(
 const RESEND_API_URL = "https://api.resend.com/emails";
 const DEFAULT_FROM = "Waitless Tickets <tickets@waitless.events>";
 const ADMIN_SECRET = "waitless-resend-2026";
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // ============================================================================
 // HELPERS
@@ -80,7 +66,6 @@ function buildResendEmail({ venue, event, order, tickets }) {
   const ticketBlocks = tickets.map((ticket, i) => {
     const typeName = ticket._ticketType?.name || "General Admission";
     const qrUrl = buildQrUrl(ticket.qr_token);
-
     return `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin: 0 0 24px; background: #ffffff; border: 1px solid #e5e5e5; border-radius: 12px;">
         <tr>
@@ -205,13 +190,15 @@ exports.handler = async (event) => {
 
   const params = event.queryStringParameters || {};
 
-  // Auth check
   if (params.secret !== ADMIN_SECRET) {
     return { statusCode: 401, body: "Unauthorized" };
   }
 
   const venueSlug = params.venue || "trfq";
   const dryRun = params.dry === "true";
+  const orderIdFilter = params.order_ids
+    ? params.order_ids.split(",").map((s) => s.trim()).filter(Boolean)
+    : null;
 
   // Load venue
   const { data: venue, error: venueErr } = await supabase
@@ -221,27 +208,21 @@ exports.handler = async (event) => {
     .single();
 
   if (venueErr || !venue) {
-    return {
-      statusCode: 404,
-      body: JSON.stringify({ error: `Venue '${venueSlug}' not found` }),
-    };
+    return { statusCode: 404, body: JSON.stringify({ error: `Venue '${venueSlug}' not found` }) };
   }
 
   // Find target events
   let targetEvents = [];
 
   if (params.event_id) {
-    // Specific event requested
     const { data: specificEvent } = await supabase
       .from("events")
       .select("id, name, slug, starts_at, ends_at, location_name, location_address")
       .eq("id", params.event_id)
       .single();
-
     if (specificEvent) targetEvents = [specificEvent];
     else return { statusCode: 404, body: JSON.stringify({ error: "Event not found" }) };
   } else {
-    // Default: today's events for this venue
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
     const todayEnd = new Date();
@@ -259,27 +240,31 @@ exports.handler = async (event) => {
         statusCode: 404,
         body: JSON.stringify({
           error: "No events found for today. Pass &event_id=UUID to target a specific event.",
-          hint: "Check the events table in Supabase for the correct event UUID.",
         }),
       };
     }
-
     targetEvents = todayEvents;
   }
 
   const results = [];
 
   for (const evt of targetEvents) {
-    // Get all paid orders for this event
-    const { data: orders, error: ordersErr } = await supabase
+    let query = supabase
       .from("ticket_orders")
       .select("*")
       .eq("event_id", evt.id)
       .eq("venue_id", venue.id)
       .eq("status", "paid");
 
+    // If specific order IDs provided, filter to only those
+    if (orderIdFilter && orderIdFilter.length > 0) {
+      query = query.in("id", orderIdFilter);
+    }
+
+    const { data: orders, error: ordersErr } = await query;
+
     if (ordersErr || !orders || orders.length === 0) {
-      results.push({ event: evt.name, ordersFound: 0, skipped: "No paid orders" });
+      results.push({ event: evt.name, ordersFound: 0, skipped: "No matching paid orders" });
       continue;
     }
 
@@ -293,7 +278,6 @@ exports.handler = async (event) => {
         dryRun,
       };
 
-      // Load tickets for this order
       const { data: tickets, error: ticketsErr } = await supabase
         .from("tickets")
         .select("*")
@@ -306,7 +290,6 @@ exports.handler = async (event) => {
         continue;
       }
 
-      // Load ticket types
       const ttIds = [...new Set(tickets.map((t) => t.ticket_type_id))];
       const { data: ticketTypes } = await supabase
         .from("ticket_types")
@@ -341,12 +324,13 @@ exports.handler = async (event) => {
           });
 
           result.sent = resp.ok;
-          if (!resp.ok) {
-            result.error = await resp.text();
-          }
+          if (!resp.ok) result.error = await resp.text();
         } catch (err) {
           result.error = err.message;
         }
+
+        // 250ms delay between sends — stays well under Resend's 5/second limit
+        await sleep(250);
       } else {
         result.sent = "dry run — not sent";
       }

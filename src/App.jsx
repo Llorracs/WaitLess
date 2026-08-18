@@ -84,6 +84,9 @@ function getRouteFromUrl() {
   const isQR = parts[1] === "qr";
   const isAdmin = parts[1] === "admin";
   const isCheckin = parts[1] === "checkin";
+  // Deep link straight into the demo's TICKETS tab (linked from the landing
+  // page). Only meaningful on the 'demo' venue — see the demoView effect.
+  const isTickets = parts[1] === "tickets";
 
   const isBuy = parts[1] === "buy" && !!parts[2];
   const eventSlug = isBuy ? parts[2] : null;
@@ -99,7 +102,7 @@ function getRouteFromUrl() {
 
   return {
     slug,
-    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin,
+    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin, isTickets,
     isBuy, eventSlug, isBuyConfirmation,
     isSignup, isMasterAdmin, isOAuthComplete,
     isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
@@ -563,7 +566,7 @@ export default function App() {
   const [demoOrders, setDemoOrders] = useState([]);
   const {
     slug,
-    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin,
+    isManager, isBartender, isKitchen, isQR, isAdmin, isCheckin, isTickets,
     isBuy, eventSlug, isBuyConfirmation,
     isSignup, isMasterAdmin, isOAuthComplete,
     isPrivacy, isTerms, isRefundPolicy, isVenueTerms,
@@ -573,6 +576,7 @@ export default function App() {
     if (isManager) setDemoView("manager");
     if (isBartender) setDemoView("bartender");
     if (isKitchen) setDemoView("kitchen");
+    if (isTickets) setDemoView("tickets");
   }, []);
 
   useEffect(() => {

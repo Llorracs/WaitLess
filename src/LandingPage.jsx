@@ -239,6 +239,23 @@ export default function LandingPage() {
             <span style={S.demoDesc}>Live queue, status updates, verification</span>
             <span style={S.demoLink}>Open Demo → (PIN: 1234)</span>
           </a>
+
+          {/* Ticketing sits on its own row below the two ordering views —
+              it's the differentiator, so it gets the full width. */}
+          <a
+            href="/demo/tickets"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="hover-lift"
+            style={{ ...S.demoCard, ...S.demoCardWide }}
+          >
+            <span style={S.demoIcon}>🎟️</span>
+            <span style={S.demoLabel}>TICKETING VIEW</span>
+            <span style={S.demoDesc}>
+              Get a real ticket, then scan it at the door — it genuinely checks in
+            </span>
+            <span style={S.demoLink}>Open Demo →</span>
+          </a>
         </div>
       </section>
 
@@ -542,6 +559,12 @@ const S = {
     flex: "1 1 240px", padding: "32px 24px", background: "#141414", borderRadius: 16,
     border: "1px solid #222", textAlign: "center", textDecoration: "none", color: "#f5f5f5",
     display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
+  },
+  // Forces a full-width row inside the wrapping demoCards flex container,
+  // so ticketing lands underneath the patron/bartender pair.
+  demoCardWide: {
+    flex: "1 1 100%", maxWidth: "100%",
+    border: "1px solid #1E4D8C44", boxShadow: "0 0 30px #1E4D8C11",
   },
   demoIcon: { fontSize: 36 },
   demoLabel: { fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 3 },

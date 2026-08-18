@@ -38,6 +38,14 @@ import DemoStepGuide, { advanceDemoStep, resetDemoStep } from "./DemoStepGuide";
 // The server is authoritative; this just keeps the stepper honest.
 const MAX_DEMO_TICKETS = 2;
 
+// The issued ticket is persisted so it survives leaving this tab. Without
+// this, switching to PATRON/BAR (or reloading) unmounts the component and
+// the QR is gone for good — with no way back short of issuing a new ticket.
+// TTL matches the 24h comp sweep in demo-comp-ticket.cjs, so we never show
+// a QR whose row the server has already deleted.
+const TICKET_STORAGE_PREFIX = "waitless_demo_ticket_";
+const TICKET_TTL_MS = 24 * 60 * 60 * 1000;
+
 const STEPS = [
   { n: 1, label: "SELECT" },
   { n: 2, label: "YOUR TICKET" },
@@ -92,6 +100,43 @@ export default function DemoTicketsView({ venue, BRAND }) {
 
   // The demo PIN is public by design — it's printed on the landing page too.
   const demoPin = venue.bartender_pin || "1234";
+
+  const ticketStorageKey = `${TICKET_STORAGE_PREFIX}${venue.id}`;
+
+  // ==========================================================================
+  // RESTORE A PREVIOUSLY ISSUED TICKET
+  //
+  // Runs before the event load so someone returning from the scanner (or from
+  // another demo tab) lands straight back on their ticket instead of an empty
+  // picker.
+  // ==========================================================================
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ticketStorageKey);
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      if (!saved?.issued?.tickets?.length) return;
+      if (Date.now() - (saved.savedAt || 0) > TICKET_TTL_MS) {
+        localStorage.removeItem(ticketStorageKey);
+        return;
+      }
+      setIssued(saved.issued);
+      setStep(saved.step === 3 ? 3 : 2);
+    } catch {
+      try { localStorage.removeItem(ticketStorageKey); } catch {}
+    }
+  }, [ticketStorageKey]);
+
+  // Persist whenever the ticket or step changes.
+  useEffect(() => {
+    if (!issued) return;
+    try {
+      localStorage.setItem(
+        ticketStorageKey,
+        JSON.stringify({ issued, step, savedAt: Date.now() })
+      );
+    } catch {}
+  }, [issued, step, ticketStorageKey]);
 
   // ==========================================================================
   // LOAD THE DEMO EVENT + TIERS
@@ -226,6 +271,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
     setIssueError(null);
     setStep(1);
     resetDemoStep("tickets");
+    try { localStorage.removeItem(ticketStorageKey); } catch {}
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -444,36 +490,13 @@ export default function DemoTicketsView({ venue, BRAND }) {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {issued.tickets.map((t, i) => (
-              <div key={t.id} style={{
-                background: "#fff", borderRadius: 16, padding: "24px 20px",
-                textAlign: "center",
-              }}>
-                <div style={{
-                  fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
-                  letterSpacing: 3, color: "#1E4D8C", textTransform: "uppercase",
-                  marginBottom: 4,
-                }}>
-                  {t.ticketTypeName}
-                </div>
-                {issued.tickets.length > 1 && (
-                  <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, color: "#888", marginBottom: 12 }}>
-                    Ticket {i + 1} of {issued.tickets.length}
-                  </div>
-                )}
-                <img
-                  src={t.qrUrl}
-                  alt="Demo ticket QR code"
-                  width={240}
-                  height={240}
-                  style={{ display: "block", margin: "8px auto 0", maxWidth: "100%", height: "auto" }}
-                />
-                <div style={{
-                  fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#999",
-                  letterSpacing: 1, marginTop: 12, wordBreak: "break-all",
-                }}>
-                  {t.qrToken}
-                </div>
-              </div>
+              <TicketCard
+                key={t.id}
+                ticket={t}
+                index={i}
+                total={issued.tickets.length}
+                size={240}
+              />
             ))}
           </div>
 
@@ -509,9 +532,26 @@ export default function DemoTicketsView({ venue, BRAND }) {
           <SectionHeader BRAND={BRAND}>Scan It At The Door</SectionHeader>
 
           <div style={{ fontSize: 14, color: BRAND.gray, lineHeight: 1.7, marginBottom: 20 }}>
-            Open the door scanner on a <strong style={{ color: BRAND.white }}>second device</strong>{" "}
-            (or a second tab) and point it at the QR from the last step. Keep this screen
-            open so you have the code to scan.
+            Point a <strong style={{ color: BRAND.white }}>second device</strong> at the QR
+            below. Only have one phone? Open the scanner, tap{" "}
+            <strong style={{ color: BRAND.white }}>MANUAL</strong>, and search{" "}
+            <strong style={{ color: BRAND.white }}>Demo Guest</strong> — it checks in the
+            same way, through the same database.
+          </div>
+
+          {/* The QR stays on THIS screen. It's the thing being scanned, so
+              hiding it behind a back button would make the instruction above
+              impossible to follow on a single screen. */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 20 }}>
+            {issued.tickets.map((t, i) => (
+              <TicketCard
+                key={t.id}
+                ticket={t}
+                index={i}
+                total={issued.tickets.length}
+                size={200}
+              />
+            ))}
           </div>
 
           {/* PIN callout */}
@@ -582,17 +622,30 @@ export default function DemoTicketsView({ venue, BRAND }) {
             hours, so the demo always starts fresh.
           </div>
 
-          <button
-            onClick={restart}
-            style={{
-              marginTop: 20, width: "100%", padding: "14px",
-              background: "transparent", border: "1px solid #333", borderRadius: 12,
-              color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 13,
-              fontWeight: 600, letterSpacing: 2, cursor: "pointer",
-            }}
-          >
-            START OVER
-          </button>
+          <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+            <button
+              onClick={() => { setStep(2); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+              style={{
+                flex: 1, padding: "14px",
+                background: "transparent", border: `1px solid ${BRAND.accent}55`, borderRadius: 12,
+                color: BRAND.accent, fontFamily: "'Oswald', sans-serif", fontSize: 13,
+                fontWeight: 600, letterSpacing: 2, cursor: "pointer",
+              }}
+            >
+              ← MY TICKET
+            </button>
+            <button
+              onClick={restart}
+              style={{
+                flex: 1, padding: "14px",
+                background: "transparent", border: "1px solid #333", borderRadius: 12,
+                color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 13,
+                fontWeight: 600, letterSpacing: 2, cursor: "pointer",
+              }}
+            >
+              START OVER
+            </button>
+          </div>
         </>
       )}
 
@@ -613,6 +666,46 @@ function Centered({ children, BRAND }) {
       color: BRAND.white,
     }}>
       {children}
+    </div>
+  );
+}
+
+/**
+ * The ticket itself. Rendered on step 2 (the reveal) and again on step 3
+ * (where it's the thing actually being scanned) so the QR is never more
+ * than a scroll away once issued.
+ */
+function TicketCard({ ticket, index, total, size = 240 }) {
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 16, padding: "24px 20px",
+      textAlign: "center",
+    }}>
+      <div style={{
+        fontFamily: "'Oswald', sans-serif", fontSize: 11, fontWeight: 600,
+        letterSpacing: 3, color: "#1E4D8C", textTransform: "uppercase",
+        marginBottom: 4,
+      }}>
+        {ticket.ticketTypeName}
+      </div>
+      {total > 1 && (
+        <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 12, color: "#888", marginBottom: 12 }}>
+          Ticket {index + 1} of {total}
+        </div>
+      )}
+      <img
+        src={ticket.qrUrl}
+        alt="Demo ticket QR code"
+        width={size}
+        height={size}
+        style={{ display: "block", margin: "8px auto 0", maxWidth: "100%", height: "auto" }}
+      />
+      <div style={{
+        fontFamily: "'Space Mono', monospace", fontSize: 10, color: "#999",
+        letterSpacing: 1, marginTop: 12, wordBreak: "break-all",
+      }}>
+        {ticket.qrToken}
+      </div>
     </div>
   );
 }

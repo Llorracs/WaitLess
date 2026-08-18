@@ -98,6 +98,9 @@ export default function DemoTicketsView({ venue, BRAND }) {
   const [issueError, setIssueError] = useState(null);
   const [issued, setIssued] = useState(null); // { tickets, emailed, event }
 
+  // Index of the ticket being presented full-screen, or null.
+  const [presenting, setPresenting] = useState(null);
+
   // The demo PIN is public by design — it's printed on the landing page too.
   const demoPin = venue.bartender_pin || "1234";
 
@@ -496,6 +499,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
                 index={i}
                 total={issued.tickets.length}
                 size={240}
+                onPresent={() => setPresenting(i)}
               />
             ))}
           </div>
@@ -572,6 +576,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
                 index={i}
                 total={issued.tickets.length}
                 size={200}
+                onPresent={() => setPresenting(i)}
               />
             ))}
           </div>
@@ -676,6 +681,15 @@ export default function DemoTicketsView({ venue, BRAND }) {
       )}
 
       <DemoStepGuide venue={venue} BRAND={BRAND} track="tickets" />
+
+      {/* Full-screen QR — sits above the step guide (zIndex 400) so the
+          presentation surface is genuinely uncluttered while being scanned. */}
+      {presenting != null && issued?.tickets?.[presenting] && (
+        <PresentedTicket
+          ticket={issued.tickets[presenting]}
+          onClose={() => setPresenting(null)}
+        />
+      )}
     </div>
   );
 }
@@ -683,6 +697,100 @@ export default function DemoTicketsView({ venue, BRAND }) {
 // ============================================================================
 // SUB-COMPONENTS
 // ============================================================================
+
+/**
+ * Full-bleed white screen showing nothing but the QR, for holding up to
+ * someone else's scanner.
+ *
+ * This exists instead of opening a real browser tab: window.open() here
+ * would fire after an await (issuing the ticket is async), which breaks the
+ * user-gesture chain and gets blocked silently by mobile Safari. It's also
+ * simply easier to scan — a phone-to-phone scan is much more reliable
+ * against a large, high-contrast, undimmed target than a small QR sitting
+ * inside a dark page.
+ */
+function PresentedTicket({ ticket, onClose }) {
+  // Keep the screen awake while the QR is being scanned. Best-effort:
+  // unsupported on some browsers, and the lock is dropped when the tab is
+  // backgrounded, so we re-acquire on visibility change.
+  useEffect(() => {
+    let lock = null;
+    let released = false;
+
+    async function acquire() {
+      try {
+        if ("wakeLock" in navigator) {
+          lock = await navigator.wakeLock.request("screen");
+        }
+      } catch {
+        // Denied or unsupported — the QR still displays fine.
+      }
+    }
+
+    function onVisibility() {
+      if (document.visibilityState === "visible" && !released) acquire();
+    }
+
+    acquire();
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      released = true;
+      document.removeEventListener("visibilitychange", onVisibility);
+      try { lock?.release(); } catch {}
+    };
+  }, []);
+
+  return (
+    <div
+      style={{
+        position: "fixed", inset: 0, zIndex: 600, background: "#fff",
+        display: "flex", flexDirection: "column",
+        alignItems: "center", justifyContent: "center", gap: 20,
+        padding: "calc(env(safe-area-inset-top, 0px) + 16px) 16px calc(env(safe-area-inset-bottom, 0px) + 16px)",
+      }}
+    >
+      <button
+        onClick={onClose}
+        aria-label="Close full screen ticket"
+        style={{
+          position: "absolute",
+          top: "calc(env(safe-area-inset-top, 0px) + 12px)", right: 16,
+          width: 44, height: 44, borderRadius: 22,
+          border: "1px solid #ddd", background: "#fff", color: "#666",
+          fontSize: 20, lineHeight: 1, cursor: "pointer",
+        }}
+      >
+        ✕
+      </button>
+
+      {/* Sized off the smaller viewport edge so it's as large as it can be
+          in either orientation without overflowing. */}
+      <img
+        src={ticket.qrUrl}
+        alt="Demo ticket QR code"
+        style={{
+          width: "min(86vw, 62vh)", height: "auto",
+          imageRendering: "pixelated",
+        }}
+      />
+
+      <div style={{
+        fontFamily: "'Space Mono', monospace", fontSize: 11, color: "#999",
+        letterSpacing: 1, wordBreak: "break-all", textAlign: "center", maxWidth: 320,
+      }}>
+        {ticket.qrToken}
+      </div>
+
+      <div style={{
+        fontFamily: "'Oswald', sans-serif", fontSize: 13, fontWeight: 600,
+        letterSpacing: 2, color: "#1E4D8C", textAlign: "center",
+      }}>
+        HOLD THIS UP TO THE SCANNER
+      </div>
+    </div>
+  );
+}
 
 function Centered({ children, BRAND }) {
   return (
@@ -701,7 +809,7 @@ function Centered({ children, BRAND }) {
  * (where it's the thing actually being scanned) so the QR is never more
  * than a scroll away once issued.
  */
-function TicketCard({ ticket, index, total, size = 240 }) {
+function TicketCard({ ticket, index, total, size = 240, onPresent }) {
   return (
     <div style={{
       background: "#fff", borderRadius: 16, padding: "24px 20px",
@@ -732,6 +840,20 @@ function TicketCard({ ticket, index, total, size = 240 }) {
       }}>
         {ticket.qrToken}
       </div>
+
+      {onPresent && (
+        <button
+          onClick={onPresent}
+          style={{
+            marginTop: 16, width: "100%", padding: "14px",
+            background: "#0a0a0a", border: "none", borderRadius: 10, color: "#fff",
+            fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 700,
+            letterSpacing: 2, cursor: "pointer",
+          }}
+        >
+          SHOW FULL SCREEN TO SCAN
+        </button>
+      )}
     </div>
   );
 }

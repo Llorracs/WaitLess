@@ -248,8 +248,14 @@ export default function CheckInView({ venue, BRAND }) {
           { facingMode: "environment" },
           {
             fps: 10,
-            qrbox: { width: 240, height: 240 },
-            aspectRatio: 1.0,
+            // Scan region as large as possible: ~85% of the shorter viewport
+            // edge, computed against the actual full-screen container.
+            qrbox: (viewfinderWidth, viewfinderHeight) => {
+              const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+              const size = Math.floor(minEdge * 0.85);
+              return { width: size, height: size };
+            },
+            aspectRatio: window.innerWidth / window.innerHeight,
           },
           (decodedText) => {
             if (stopped) return;
@@ -594,74 +600,123 @@ export default function CheckInView({ venue, BRAND }) {
   // ==========================================================================
   // RENDER — Main check-in UI
   // ==========================================================================
+  const isScanTab = activeTab === "scan";
+
   return (
     <div style={{ minHeight: "100vh", background: BRAND.black, color: BRAND.white }}>
-      {/* Sticky top bar — event name + stats + change-event button */}
+      {/* Forces the html5-qrcode video (and its internal canvas overlay) to
+          fill the container edge-to-edge instead of the library's own
+          computed inline size. `100dvh` falls back to `100vh` on browsers
+          that don't support it (declared first, overridden second). */}
+      <style>{`
+        #${scannerDivId} {
+          height: 100vh;
+          height: 100dvh;
+        }
+        #${scannerDivId} video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+        }
+      `}</style>
+
+      {/* Full-screen camera feed — only mounted while the SCAN tab is active.
+          Sits behind the header/caption overlays (zIndex 1). */}
+      {isScanTab && (
+        <div
+          id={scannerDivId}
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0,
+            width: "100vw", height: "100vh",
+            background: "#000", zIndex: 1,
+          }}
+        />
+      )}
+
+      {/* Header — event name + stats + change-event button. Floats as a
+          translucent overlay over the camera feed on the SCAN tab; solid
+          and in-flow (sticky) on MANUAL / RECENT. Safe-area padding keeps
+          it clear of the iPhone notch/status bar in installed-PWA mode. */}
       <div style={{
-        position: "sticky", top: 0, zIndex: 100, background: BRAND.black,
-        borderBottom: "1px solid #1a1a1a", padding: "10px 16px",
-        display: "flex", justifyContent: "space-between", alignItems: "center",
+        position: isScanTab ? "fixed" : "sticky",
+        top: 0, left: 0, right: 0, zIndex: 100,
+        background: isScanTab ? "rgba(10,10,10,0.6)" : BRAND.black,
+        backdropFilter: isScanTab ? "blur(14px)" : undefined,
+        WebkitBackdropFilter: isScanTab ? "blur(14px)" : undefined,
+        borderBottom: "1px solid rgba(255,255,255,0.08)",
       }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: BRAND.accent, letterSpacing: 2 }}>
-            CHECK-IN
+        <div style={{
+          paddingTop: "env(safe-area-inset-top, 0px)",
+          paddingLeft: "env(safe-area-inset-left, 0px)",
+          paddingRight: "env(safe-area-inset-right, 0px)",
+        }}>
+          <div style={{
+            padding: "10px 16px",
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+          }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 9, color: BRAND.accent, letterSpacing: 2 }}>
+                CHECK-IN
+              </div>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: BRAND.white, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {selectedEvent.name}
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginRight: 10 }}>
+              <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, color: BRAND.accent, lineHeight: 1 }}>
+                {stats.checkedIn} / {stats.total}
+              </div>
+              <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 8, color: BRAND.dimText, letterSpacing: 1 }}>
+                CHECKED IN
+              </div>
+            </div>
+            <button
+              onClick={() => { setSelectedEvent(null); setRecentScans([]); }}
+              style={{ background: "transparent", border: "1px solid #333", borderRadius: 10, padding: "6px 10px", color: BRAND.gray, fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1, cursor: "pointer" }}
+            >
+              CHANGE
+            </button>
           </div>
-          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600, letterSpacing: 1, color: BRAND.white, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {selectedEvent.name}
+
+          {/* Tab bar */}
+          <div style={{ display: "flex", gap: 0, borderTop: isScanTab ? "1px solid rgba(255,255,255,0.08)" : "none" }}>
+            {[
+              { key: "scan",   label: "SCAN" },
+              { key: "manual", label: "MANUAL" },
+              { key: "recent", label: `RECENT (${recentScans.length})` },
+            ].map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                style={{
+                  flex: 1, padding: "12px 8px", background: "transparent",
+                  border: "none", borderBottom: activeTab === tab.key ? `2px solid ${BRAND.accent}` : "2px solid transparent",
+                  color: activeTab === tab.key ? BRAND.accent : BRAND.gray,
+                  fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2, marginRight: 10 }}>
-          <div style={{ fontFamily: "'Oswald', sans-serif", fontSize: 18, fontWeight: 700, color: BRAND.accent, lineHeight: 1 }}>
-            {stats.checkedIn} / {stats.total}
-          </div>
-          <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 8, color: BRAND.dimText, letterSpacing: 1 }}>
-            CHECKED IN
-          </div>
-        </div>
-        <button
-          onClick={() => { setSelectedEvent(null); setRecentScans([]); }}
-          style={{ background: "transparent", border: "1px solid #333", borderRadius: 10, padding: "6px 10px", color: BRAND.gray, fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1, cursor: "pointer" }}
-        >
-          CHANGE
-        </button>
       </div>
 
-      {/* Tab bar */}
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid #1a1a1a", background: BRAND.black }}>
-        {[
-          { key: "scan",   label: "SCAN" },
-          { key: "manual", label: "MANUAL" },
-          { key: "recent", label: `RECENT (${recentScans.length})` },
-        ].map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            style={{
-              flex: 1, padding: "12px 8px", background: "transparent",
-              border: "none", borderBottom: activeTab === tab.key ? `2px solid ${BRAND.accent}` : "2px solid transparent",
-              color: activeTab === tab.key ? BRAND.accent : BRAND.gray,
-              fontFamily: "'Oswald', sans-serif", fontSize: 12, fontWeight: 600, letterSpacing: 2, cursor: "pointer",
-            }}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* SCAN TAB */}
-      {activeTab === "scan" && (
-        <div style={{ padding: "16px", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <div
-            id={scannerDivId}
-            style={{
-              width: "100%", maxWidth: 400, aspectRatio: "1 / 1",
-              borderRadius: 16, overflow: "hidden", background: "#000",
-              border: `2px solid ${BRAND.accent}44`,
-            }}
-          />
-          <p style={{ fontSize: 12, color: BRAND.gray, textAlign: "center", margin: 0, fontFamily: "'Space Mono', monospace", letterSpacing: 1 }}>
+      {/* SCAN TAB caption — floats over the bottom of the camera feed */}
+      {isScanTab && (
+        <div style={{
+          position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 50,
+          display: "flex", justifyContent: "center",
+          paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 28px)",
+          pointerEvents: "none",
+        }}>
+          <span style={{
+            background: "rgba(10,10,10,0.6)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+            padding: "10px 18px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)",
+            fontSize: 12, color: BRAND.gray, fontFamily: "'Space Mono', monospace", letterSpacing: 1,
+          }}>
             POINT CAMERA AT TICKET QR CODE
-          </p>
+          </span>
         </div>
       )}
 

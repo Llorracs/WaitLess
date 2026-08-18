@@ -161,17 +161,21 @@ export default function BillingView({ venue, BRAND }) {
           <p style={S.sectionSub}>Start with a 14-day free trial. Cancel anytime.</p>
 
           <div style={S.planGrid}>
-            {/* Monthly */}
+            {/* Self-Serve */}
             <div style={S.planCard}>
-              <span style={S.planLabel}>MONTHLY</span>
+              <span style={S.planLabel}>SELF-SERVE</span>
               <div style={S.planPrice}>
                 <span style={S.planCurrency}>$</span>
                 <span style={S.planAmount}>199</span>
                 <span style={S.planPeriod}>/mo</span>
               </div>
+              <div style={S.planPriceBreakdown}>
+                You set up and manage everything yourself
+              </div>
               <div style={S.planFeatures}>
                 {[
                   "Full ordering system",
+                  "Paperless ticketing & check-in",
                   "Bartender queue",
                   "Custom branding",
                   "Menu management",
@@ -186,29 +190,29 @@ export default function BillingView({ venue, BRAND }) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => handleCheckout("monthly")} disabled={loading} style={S.planBtn}>
+              <button onClick={() => handleCheckout("self_serve")} disabled={loading} style={S.planBtn}>
                 {loading ? "LOADING..." : "START FREE TRIAL"}
               </button>
               <span style={S.planNote}>14 days free, then $199/mo</span>
             </div>
 
-            {/* Annual */}
+            {/* White Glove */}
             <div style={{ ...S.planCard, ...S.planFeatured }}>
-              <div style={S.saveBadge}>SAVE $589</div>
-              <span style={{ ...S.planLabel, color: "#1E4D8C" }}>ANNUAL</span>
+              <div style={S.saveBadge}>DONE FOR YOU</div>
+              <span style={{ ...S.planLabel, color: "#1E4D8C" }}>WHITE GLOVE</span>
               <div style={S.planPrice}>
                 <span style={S.planCurrency}>$</span>
-                <span style={S.planAmount}>1,799</span>
-                <span style={S.planPeriod}>/yr</span>
+                <span style={S.planAmount}>449</span>
+                <span style={S.planPeriod}>/mo</span>
               </div>
               <div style={S.planPriceBreakdown}>
-                That's <strong>$150/mo</strong> — save 25%
+                Full setup, menu, and ongoing support — done for you
               </div>
               <div style={S.planFeatures}>
                 {[
-                  "Everything in Monthly",
-                  "25% discount",
-                  "Locked-in pricing",
+                  "Everything in Self-Serve",
+                  "White-glove onboarding & setup",
+                  "We build & maintain your menu",
                   "Priority support",
                 ].map((f) => (
                   <div key={f} style={S.planFeature}>
@@ -216,10 +220,10 @@ export default function BillingView({ venue, BRAND }) {
                   </div>
                 ))}
               </div>
-              <button onClick={() => handleCheckout("annual")} disabled={loading} style={{ ...S.planBtn, background: "linear-gradient(135deg, #1E4D8C, #d4a843)" }}>
+              <button onClick={() => handleCheckout("white_glove")} disabled={loading} style={{ ...S.planBtn, background: "linear-gradient(135deg, #1E4D8C, #d4a843)" }}>
                 {loading ? "LOADING..." : "START FREE TRIAL"}
               </button>
-              <span style={S.planNote}>14 days free, then $1,799/yr</span>
+              <span style={S.planNote}>14 days free, then $449/mo</span>
             </div>
           </div>
 
@@ -255,7 +259,7 @@ export default function BillingView({ venue, BRAND }) {
           { q: "Can I cancel anytime?", a: "Yes. Cancel through your subscription portal anytime. No cancellation fees." },
           { q: "What happens when my trial ends?", a: "Your card is charged automatically. If you cancel before the trial ends, you pay nothing." },
           { q: "Do you take a cut of my sales?", a: "No. We never touch your revenue. Square payments go directly to your bank account. You keep 100% of your sales and tips." },
-          { q: "What if I need help getting set up?", a: "We'll walk you through everything. Setup takes about 5 minutes." },
+          { q: "What if I need help getting set up?", a: "Self-Serve setup takes about 5 minutes and we're here if you get stuck. Or choose White Glove and we'll build your menu and handle setup for you." },
         ].map((faq) => (
           <div key={faq.q} style={S.faqItem}>
             <span style={S.faqQ}>{faq.q}</span>

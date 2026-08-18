@@ -70,13 +70,13 @@ export default function LandingPage() {
       <section style={S.hero}>
         <div style={S.heroGlow} />
         <div style={{ ...S.heroContent, animation: "fadeUp 1s ease forwards" }}>
-          <div style={S.heroBadge}>MOBILE ORDERING FOR VENUES</div>
+          <div style={S.heroBadge}>MOBILE ORDERING + PAPERLESS TICKETING</div>
           <h1 style={S.heroTitle}>
             Drop the weight.<br />
             <span style={S.heroAccent}>Lose the wait.</span>
           </h1>
           <p style={S.heroSub}>
-            Your customers order and pay from their phone. Your bartenders see a live queue. No app download. No hardware. Just faster service and happier people.
+            Sell drinks and event tickets from one platform, both from your customers' phones — no app download, no hardware. One flat monthly rate. No per-ticket fees, ever. And your customer list stays yours — we never sell it or insert ourselves between you and your fans.
           </p>
           <div style={S.heroCtas}>
             <a href="#contact" style={S.heroPrimary}>GET STARTED FREE</a>
@@ -249,20 +249,21 @@ export default function LandingPage() {
         style={{ ...S.section, opacity: visible.pricing ? 1 : 0, transform: visible.pricing ? "none" : "translateY(30px)", transition: "all 0.8s ease" }}
       >
         <h2 style={S.sectionTitle}>Simple Pricing</h2>
-        <p style={S.sectionSub}>One plan. Everything included. No feature gates, no upsells.</p>
+        <p style={S.sectionSub}>Flat monthly rate. No per-ticket fees. No feature gates, no upsells.</p>
 
         <div style={S.pricingCards}>
           <div className="hover-lift" style={S.pricingCard}>
-            <span style={S.pricingTier}>MONTHLY</span>
+            <span style={S.pricingTier}>SELF-SERVE</span>
             <div style={S.pricingPrice}>
               <span style={S.pricingCurrency}>$</span>
               <span style={S.pricingAmount}>199</span>
               <span style={S.pricingPeriod}>/mo</span>
             </div>
-            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>14-day free trial included</span>
+            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>14-day free trial · you set up & manage everything</span>
             <div style={S.pricingFeatures}>
               {[
                 "Full mobile ordering system",
+                "Paperless ticketing & door check-in",
                 "Real-time bartender queue",
                 "White-label branding",
                 "Menu management dashboard",
@@ -271,6 +272,7 @@ export default function LandingPage() {
                 "QR codes & print posters",
                 "Age verification",
                 "Unlimited orders",
+                "No per-ticket fees, ever",
                 "We never touch your revenue",
               ].map((f) => (
                 <div key={f} style={S.pricingFeature}>
@@ -282,19 +284,19 @@ export default function LandingPage() {
           </div>
 
           <div className="hover-lift" style={{ ...S.pricingCard, ...S.pricingFeatured }}>
-            <div style={{ position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>SAVE $589</div>
-            <span style={{ ...S.pricingTier, color: "#1E4D8C" }}>ANNUAL</span>
+            <div style={{ position: "absolute", top: -10, right: 16, padding: "4px 12px", borderRadius: 12, background: "linear-gradient(135deg, #1E4D8C, #d4a843)", fontFamily: "'Space Mono', monospace", fontSize: 10, fontWeight: 700, color: "#fff", letterSpacing: 1 }}>DONE FOR YOU</div>
+            <span style={{ ...S.pricingTier, color: "#1E4D8C" }}>WHITE GLOVE</span>
             <div style={S.pricingPrice}>
               <span style={S.pricingCurrency}>$</span>
-              <span style={S.pricingAmount}>1,799</span>
-              <span style={S.pricingPeriod}>/yr</span>
+              <span style={S.pricingAmount}>449</span>
+              <span style={S.pricingPeriod}>/mo</span>
             </div>
-            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>That's $150/mo — save 25%</span>
+            <span style={{ fontSize: 13, color: "#888", marginBottom: 4 }}>14-day free trial · we set it all up for you</span>
             <div style={S.pricingFeatures}>
               {[
-                "Everything included",
-                "25% discount",
-                "Locked-in pricing",
+                "Everything in Self-Serve",
+                "White-glove onboarding & setup",
+                "We build & maintain your menu",
                 "Priority support",
               ].map((f) => (
                 <div key={f} style={S.pricingFeature}>
@@ -310,7 +312,7 @@ export default function LandingPage() {
         <div style={{ maxWidth: 600, margin: "32px auto 0", padding: "20px 24px", background: "#0a0a0a", borderRadius: 14, border: "1px solid #1a1a1a", textAlign: "center" }}>
           <p style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, color: "#d4a843", margin: "0 0 8px" }}>THE MATH</p>
           <p style={{ fontSize: 14, color: "#ccc", lineHeight: 1.8, margin: 0 }}>
-            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#1E4D8C" }}>$480+ in additional monthly revenue</strong>. Waitless pays for itself in a single busy weekend.
+            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#1E4D8C" }}>$480+ in additional monthly revenue</strong>. Add in ticket sales with zero per-ticket fees, and Waitless pays for itself in a single busy weekend.
           </p>
         </div>
       </section>

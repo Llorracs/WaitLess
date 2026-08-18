@@ -22,8 +22,8 @@ const supabase = createClient(
 );
 
 const PRICES = {
-  monthly: process.env.STRIPE_PRICE_MONTHLY,   // $199/month
-  annual: process.env.STRIPE_PRICE_ANNUAL,      // $1,799/year
+  self_serve: process.env.STRIPE_PRICE_SELF_SERVE,     // $199/month
+  white_glove: process.env.STRIPE_PRICE_WHITE_GLOVE,   // $449/month
 };
 
 exports.handler = async (event) => {
@@ -73,7 +73,7 @@ exports.handler = async (event) => {
         }
       }
 
-      const priceId = plan === 'annual' ? PRICES.annual : PRICES.monthly;
+      const priceId = plan === 'white_glove' ? PRICES.white_glove : PRICES.self_serve;
 
       const sessionParams = {
         mode: 'subscription',

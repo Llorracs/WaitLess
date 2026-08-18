@@ -72,7 +72,9 @@ const TRACKS = {
     key: "waitless_demo_step_scanner",
     steps: [
       { text: "Point the camera at the guest's ticket QR." },
-      { text: "Now scan the same ticket again.", emphasized: true },
+      // Says "pull away" because one check-in fires per presentation — a
+      // ticket held steady deliberately won't re-trigger.
+      { text: "Pull away, then scan the same ticket again.", emphasized: true },
     ],
   },
 };

@@ -46,7 +46,19 @@ import DemoStepGuide, { advanceDemoStep, resetDemoStep } from "./DemoStepGuide";
 
 const FEEDBACK_DURATION_SUCCESS = 1200;   // green flash auto-clears (ms)
 const FEEDBACK_DURATION_ERROR   = 2500;   // red flash auto-clears (ms)
-const RESCAN_COOLDOWN_MS        = 1500;   // ignore re-scans of same code within this window
+// A QR held in front of the camera decodes ~10x/second, so the same ticket
+// produces a continuous stream of identical decodes. We only want to act
+// once per *presentation* — i.e. per time the code is actually held up.
+//
+// If we don't see a given code for this long, the next sighting counts as a
+// fresh presentation (the ticket was taken away and shown again). Generous
+// enough to tolerate intermittent decodes at the edge of the frame.
+const PRESENTATION_GAP_MS       = 1000;
+// Hard floor between acting on the same token twice, whatever the gap logic
+// concludes — stops any pathological case from hammering the RPC.
+const MIN_REPROCESS_MS          = 1200;
+// How often to check the camera is still alive and restart it if not.
+const CAMERA_WATCHDOG_MS        = 3000;
 const MAX_RECENT                = 15;     // recent check-ins shown in side log
 
 // ============================================================================
@@ -111,7 +123,17 @@ export default function CheckInView({ venue, BRAND }) {
   // ---- INTERNAL REFS ----
   const scannerRef = useRef(null);          // html5-qrcode instance
   const scannerDivId = "waitless-qr-scanner";
-  const lastScanRef = useRef({ token: null, at: 0 }); // dedupe rapid re-scans
+  // Every decode, gated or not — used to tell "still being held up" from
+  // "shown again". Must update even while feedback is on screen, otherwise
+  // clearing the feedback would look like a fresh presentation.
+  const presenceRef = useRef({ token: null, at: 0 });
+  // When the current presentation of a code began — latched, so a ticket
+  // re-presented while a result is still on screen isn't lost.
+  const presentationRef = useRef({ token: null, startedAt: 0 });
+  // The last token we actually ran a check-in for.
+  const lastProcessedRef = useRef({ token: null, at: 0 });
+  // Bumped by the watchdog to force the camera to rebuild.
+  const [cameraNudge, setCameraNudge] = useState(0);
 
   // The scanner's decode callback is created once and lives as long as the
   // camera does, so it can't close over `feedback` or `handleScannedToken`
@@ -259,6 +281,12 @@ export default function CheckInView({ venue, BRAND }) {
 
     async function startScanner() {
       try {
+        // Start from a clean container. A previous instance's async clear()
+        // can leave a stale <video> behind, and stacking them is what kills
+        // the feed.
+        const host = document.getElementById(scannerDivId);
+        if (host) host.innerHTML = "";
+
         scanner = new Html5Qrcode(scannerDivId, { verbose: false });
         scannerRef.current = scanner;
 
@@ -280,10 +308,35 @@ export default function CheckInView({ venue, BRAND }) {
           },
           (decodedText) => {
             if (stopped) return;
-            // Ignore decodes while a result is on screen — the camera keeps
-            // running underneath, we just don't act on frames yet.
+
+            const token = (decodedText || "").trim();
+            const now = Date.now();
+            const prev = presenceRef.current;
+
+            // A code counts as newly presented if it's a different code, or
+            // if we lost sight of this one long enough that it must have been
+            // taken away and shown again.
+            const isNewPresentation =
+              prev.token !== token || (now - prev.at) > PRESENTATION_GAP_MS;
+
+            // Track presence BEFORE the feedback gate. If we only tracked
+            // ungated decodes, every feedback dismissal would look like the
+            // ticket had been re-presented.
+            presenceRef.current = { token, at: now };
+
+            // Latch when the current presentation began, rather than passing
+            // a momentary "is new" flag. A ticket re-presented WHILE the
+            // previous result is still on screen would otherwise be lost:
+            // by the time the overlay cleared, the code would be sitting
+            // steady in frame and no longer look new.
+            if (isNewPresentation) {
+              presentationRef.current = { token, startedAt: now };
+            }
+
+            // Don't act on frames while a result is on screen — the camera
+            // keeps running underneath regardless.
             if (feedbackRef.current) return;
-            handleScanRef.current?.(decodedText);
+            handleScanRef.current?.(token, presentationRef.current.startedAt);
           },
           (_errMsg) => {
             // Per-frame decode failures are normal (most frames have no QR);
@@ -310,23 +363,59 @@ export default function CheckInView({ venue, BRAND }) {
       }
       scannerRef.current = null;
     };
+  }, [authenticated, selectedEvent, activeTab, cameraNudge]);
+
+  // ==========================================================================
+  // CAMERA WATCHDOG
+  //
+  // Insurance rather than a diagnosis: whatever the cause — a backgrounded
+  // tab, iOS reclaiming the camera, a track ending — if the scanner is no
+  // longer in the SCANNING state while we're sitting on the scan tab, rebuild
+  // it. Without this the screen looks alive (last frame frozen) but decodes
+  // nothing, which reads to the operator as "it just stopped working".
+  // ==========================================================================
+  useEffect(() => {
+    if (!authenticated || !selectedEvent) return;
+    if (activeTab !== "scan") return;
+
+    const id = setInterval(() => {
+      const scanner = scannerRef.current;
+      if (!scanner || typeof scanner.getState !== "function") return;
+      try {
+        // html5-qrcode state enum: 1 NOT_STARTED, 2 SCANNING, 3 PAUSED
+        if (scanner.getState() !== 2) {
+          console.warn("QR scanner not in SCANNING state — restarting");
+          setCameraNudge((n) => n + 1);
+        }
+      } catch {
+        setCameraNudge((n) => n + 1);
+      }
+    }, CAMERA_WATCHDOG_MS);
+
+    return () => clearInterval(id);
   }, [authenticated, selectedEvent, activeTab]);
 
   // ==========================================================================
   // SCAN HANDLER
   // ==========================================================================
-  const handleScannedToken = useCallback(async (rawToken) => {
+  const handleScannedToken = useCallback(async (rawToken, presentationStartedAt = 0) => {
     const token = (rawToken || "").trim();
     if (!token) return;
 
-    // Dedupe — ignore the same token re-scanned within the cooldown window
     const now = Date.now();
-    if (lastScanRef.current.token === token &&
-        (now - lastScanRef.current.at) < RESCAN_COOLDOWN_MS) {
-      return;
-    }
-    lastScanRef.current = { token, at: now };
+    const last = lastProcessedRef.current;
 
+    if (last.token === token) {
+      // This presentation already produced a result — the ticket is simply
+      // still being held in front of the lens. One check-in per presentation,
+      // so a valid ticket can't check itself in and then immediately
+      // re-scan into a confusing "already checked in".
+      if (presentationStartedAt <= last.at) return;
+      // Genuinely re-presented, but implausibly fast — ignore.
+      if (now - last.at < MIN_REPROCESS_MS) return;
+    }
+
+    lastProcessedRef.current = { token, at: now };
     await processCheckin(token);
   }, [selectedEvent, venue.id, venue.owner_id]);
 
@@ -750,13 +839,30 @@ export default function CheckInView({ venue, BRAND }) {
           paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 28px)",
           pointerEvents: "none",
         }}>
-          <span style={{
-            background: "rgba(10,10,10,0.6)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
-            padding: "10px 18px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)",
-            fontSize: 12, color: BRAND.gray, fontFamily: "'Space Mono', monospace", letterSpacing: 1,
-          }}>
-            POINT CAMERA AT TICKET QR CODE
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, pointerEvents: "auto" }}>
+            <span style={{
+              background: "rgba(10,10,10,0.6)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+              padding: "10px 18px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)",
+              fontSize: 12, color: BRAND.gray, fontFamily: "'Space Mono', monospace", letterSpacing: 1,
+            }}>
+              POINT CAMERA AT TICKET QR CODE
+            </span>
+            {/* Manual escape hatch — never leave someone stuck staring at a
+                frozen feed with no way to recover. */}
+            <button
+              onClick={() => setCameraNudge((n) => n + 1)}
+              title="Restart camera"
+              aria-label="Restart camera"
+              style={{
+                background: "rgba(10,10,10,0.6)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+                border: "1px solid rgba(255,255,255,0.1)", borderRadius: 20,
+                padding: "10px 14px", color: BRAND.gray, cursor: "pointer",
+                fontFamily: "'Space Mono', monospace", fontSize: 12, letterSpacing: 1,
+              }}
+            >
+              ↻
+            </button>
+          </div>
         </div>
       )}
 

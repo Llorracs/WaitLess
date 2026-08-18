@@ -633,7 +633,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
             </div>
             <div style={{ fontSize: 13, color: BRAND.gray, lineHeight: 1.7 }}>
               The first scan turns <strong style={{ color: BRAND.success }}>green</strong> and
-              checks the ticket in. Scan the same code again and it turns{" "}
+              checks the ticket in. Pull the camera away, then scan the same code again — it turns{" "}
               <strong style={{ color: BRAND.danger }}>red</strong> — "already checked in,"
               with the time it was first used. That's the same atomic check that stops
               a screenshotted ticket getting two people through your door.

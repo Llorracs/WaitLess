@@ -38,7 +38,7 @@ import {
   verifyBartenderPin,
 } from "./lib/barOrderService";
 import { Html5Qrcode } from "html5-qrcode";
-import DemoStepGuide, { advanceDemoStep } from "./DemoStepGuide";
+import DemoStepGuide, { advanceDemoStep, resetDemoStep } from "./DemoStepGuide";
 
 // ============================================================================
 // CONSTANTS
@@ -112,6 +112,12 @@ export default function CheckInView({ venue, BRAND }) {
   const scannerRef = useRef(null);          // html5-qrcode instance
   const scannerDivId = "waitless-qr-scanner";
   const lastScanRef = useRef({ token: null, at: 0 }); // dedupe rapid re-scans
+
+  // The scanner's decode callback is created once and lives as long as the
+  // camera does, so it can't close over `feedback` or `handleScannedToken`
+  // directly without going stale. These refs give it the current values.
+  const feedbackRef = useRef(null);
+  const handleScanRef = useRef(null);
 
   // ==========================================================================
   // PIN HANDLER
@@ -232,10 +238,21 @@ export default function CheckInView({ venue, BRAND }) {
   // Stops when:  any of those becomes false (including when feedback is showing,
   //              to prevent re-firing during the success/error display)
   // ==========================================================================
+  // The camera starts ONCE and keeps running for the whole scanning session.
+  //
+  // It used to restart on every scan, because `feedback` was a dependency of
+  // this effect. That raced: the cleanup's stop()->clear() is async, so a
+  // late clear() could wipe the div out from under the scanner that had
+  // already been rebuilt for the next scan. The camera survived the first
+  // cycle or two, then died — so a second or third scan of the same ticket
+  // silently did nothing.
+  //
+  // Instead the scanner stays alive and we gate the HANDLING of decodes via
+  // refs, which also keeps rescanning instant instead of waiting for a
+  // camera restart.
   useEffect(() => {
     if (!authenticated || !selectedEvent) return;
     if (activeTab !== "scan") return;
-    if (feedback) return; // pause scanning while feedback is on-screen
 
     let stopped = false;
     let scanner = null;
@@ -249,18 +266,24 @@ export default function CheckInView({ venue, BRAND }) {
           { facingMode: "environment" },
           {
             fps: 10,
-            // Scan region as large as possible: ~85% of the shorter viewport
-            // edge, computed against the actual full-screen container.
+            // Scan region as large as possible: ~85% of the shorter edge of
+            // the actual video feed.
             qrbox: (viewfinderWidth, viewfinderHeight) => {
               const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
               const size = Math.floor(minEdge * 0.85);
               return { width: size, height: size };
             },
-            aspectRatio: window.innerWidth / window.innerHeight,
+            // No aspectRatio constraint on purpose. A portrait phone works
+            // out to ~0.46, which some iOS cameras refuse outright. The
+            // feed is stretched edge-to-edge with CSS object-fit: cover
+            // instead, which fills the screen without constraining capture.
           },
           (decodedText) => {
             if (stopped) return;
-            handleScannedToken(decodedText);
+            // Ignore decodes while a result is on screen — the camera keeps
+            // running underneath, we just don't act on frames yet.
+            if (feedbackRef.current) return;
+            handleScanRef.current?.(decodedText);
           },
           (_errMsg) => {
             // Per-frame decode failures are normal (most frames have no QR);
@@ -287,7 +310,7 @@ export default function CheckInView({ venue, BRAND }) {
       }
       scannerRef.current = null;
     };
-  }, [authenticated, selectedEvent, activeTab, feedback]);
+  }, [authenticated, selectedEvent, activeTab]);
 
   // ==========================================================================
   // SCAN HANDLER
@@ -306,6 +329,17 @@ export default function CheckInView({ venue, BRAND }) {
 
     await processCheckin(token);
   }, [selectedEvent, venue.id, venue.owner_id]);
+
+  // Each time the door device opens the scanner, start its guidance fresh —
+  // otherwise it reopens still saying "scan the same ticket again" from a
+  // previous guest.
+  useEffect(() => {
+    if (venue.slug === "demo") resetDemoStep("scanner");
+  }, [venue.slug]);
+
+  // Keep the long-lived scanner callback pointed at current state.
+  useEffect(() => { feedbackRef.current = feedback; }, [feedback]);
+  useEffect(() => { handleScanRef.current = handleScannedToken; }, [handleScannedToken]);
 
   // ==========================================================================
   // RPC CALL — used by both scanner and manual lookup
@@ -338,10 +372,11 @@ export default function CheckInView({ venue, BRAND }) {
       // RPC returns jsonb with ok=true/false
       if (data?.ok) {
         vibrateSuccess();
-        // Demo walkthrough: a real check-in just happened, so the guide's
-        // next instruction is "scan the same ticket again". No-ops on any
-        // venue that isn't 'demo'.
-        if (venue.slug === "demo") advanceDemoStep("tickets", 3);
+        // Demo walkthrough: a real check-in just happened on THIS (door)
+        // device, so prompt the operator to scan it a second time. Uses the
+        // scanner track, not the guest's — the guest is on another device
+        // entirely and localStorage doesn't cross devices.
+        if (venue.slug === "demo") advanceDemoStep("scanner", 2);
         setFeedback({
           kind: "success",
           text: "CHECKED IN",
@@ -851,7 +886,7 @@ export default function CheckInView({ venue, BRAND }) {
           On the SCAN tab it's lifted clear of the camera caption pill so the
           two don't stack on top of each other. The feedback overlay below
           sits at a higher zIndex, so a green/red flash still covers it. */}
-      <DemoStepGuide venue={venue} BRAND={BRAND} track="tickets" bottomOffset={isScanTab ? 72 : 0} />
+      <DemoStepGuide venue={venue} BRAND={BRAND} track="scanner" bottomOffset={isScanTab ? 72 : 0} />
 
       {/* FEEDBACK OVERLAY — appears over everything when a scan completes */}
       {feedback && (

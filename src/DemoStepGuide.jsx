@@ -55,12 +55,23 @@ const TRACKS = {
       { text: "Mark it ready, then tap PATRON to watch it turn green.", emphasized: true },
     ],
   },
+  // Runs on the GUEST's device (the prospect you hand the demo to).
   tickets: {
     key: "waitless_demo_step_tickets",
     steps: [
       { text: "Pick a ticket, then tap Get a Free Demo Ticket." },
-      { text: "Open the door scanner and scan your QR code." },
-      // Spec: this exact string, visually emphasized.
+      { text: "Show this QR to be scanned — or open the scanner yourself on another device." },
+      { text: "Now scan the same ticket again.", emphasized: true },
+    ],
+  },
+  // Runs on the DOOR device (/demo/checkin) — typically the seller's own
+  // phone while pitching. Separate from the guest track because the two
+  // devices are at different points in the story, and localStorage does not
+  // sync between them.
+  scanner: {
+    key: "waitless_demo_step_scanner",
+    steps: [
+      { text: "Point the camera at the guest's ticket QR." },
       { text: "Now scan the same ticket again.", emphasized: true },
     ],
   },

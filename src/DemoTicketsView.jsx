@@ -511,7 +511,14 @@ export default function DemoTicketsView({ venue, BRAND }) {
           </div>
 
           <button
-            onClick={() => { setStep(3); window.scrollTo({ top: 0, behavior: "smooth" }); }}
+            onClick={() => {
+              setStep(3);
+              // Advance on THIS device's tap. The scan itself happens on the
+              // door device, which can't reach this device's localStorage,
+              // so waiting for it would strand the guide on step 2 forever.
+              advanceDemoStep("tickets", 3);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
             style={{
               marginTop: 20, width: "100%", padding: "18px",
               background: `linear-gradient(135deg, ${BRAND.primary}, ${BRAND.accent})`,
@@ -522,6 +529,21 @@ export default function DemoTicketsView({ venue, BRAND }) {
             }}
           >
             NEXT — SCAN IT AT THE DOOR
+          </button>
+
+          {/* Mid-pitch escape hatch: once a ticket has been checked in it can
+              only ever show red again, so getting a fresh one is the only way
+              to demo the green path a second time. */}
+          <button
+            onClick={restart}
+            style={{
+              marginTop: 10, width: "100%", padding: "14px",
+              background: "transparent", border: "1px solid #333", borderRadius: 12,
+              color: BRAND.gray, fontFamily: "'Oswald', sans-serif", fontSize: 13,
+              fontWeight: 600, letterSpacing: 2, cursor: "pointer",
+            }}
+          >
+            GET ANOTHER TICKET
           </button>
         </>
       )}
@@ -610,6 +632,10 @@ export default function DemoTicketsView({ venue, BRAND }) {
               <strong style={{ color: BRAND.danger }}>red</strong> — "already checked in,"
               with the time it was first used. That's the same atomic check that stops
               a screenshotted ticket getting two people through your door.
+              <br /><br />
+              This ticket is spent now — it can only show red from here. Tap{" "}
+              <strong style={{ color: BRAND.white }}>GET ANOTHER TICKET</strong> below to
+              run the green path again for the next person.
             </div>
           </div>
 
@@ -643,7 +669,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
                 fontWeight: 600, letterSpacing: 2, cursor: "pointer",
               }}
             >
-              START OVER
+              GET ANOTHER TICKET
             </button>
           </div>
         </>

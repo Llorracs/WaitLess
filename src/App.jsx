@@ -68,6 +68,7 @@ import BuyTicketsView from "./BuyTicketsView";
 import BuyConfirmationView from "./BuyConfirmationView";
 import CheckInView from "./CheckInView";
 import DemoTicketsView from "./DemoTicketsView";
+import DemoStepGuide, { advanceDemoStep } from "./DemoStepGuide";
 
 // ============================================
 // URL PARSING
@@ -700,7 +701,12 @@ if (isVenueTerms) return <VenueTerms />;
             ].map((tab) => (
               <button
                 key={tab.key}
-                onClick={() => setDemoView(tab.key)}
+                onClick={() => {
+                  setDemoView(tab.key);
+                  // Reaching the staff side is the walkthrough's step 3 goal;
+                  // the payoff instruction comes next.
+                  if (tab.key === "bartender") advanceDemoStep("ordering", 4);
+                }}
                 style={{
                   padding: "5px 14px", borderRadius: 14, cursor: "pointer",
                   fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
@@ -739,7 +745,15 @@ if (isVenueTerms) return <VenueTerms />;
       ) : isManager || (isDemo && demoView === "manager") ? (
         <BartenderView venue={venue} BRAND={BRAND} />
       ) : (
-        <PatronView venue={venue} menu={menu} BRAND={BRAND} demoOrders={isDemo ? demoOrders : null} setDemoOrders={isDemo ? setDemoOrders : null} />
+        <PatronView venue={venue} menu={menu} BRAND={BRAND} demoOrders={isDemo ? demoOrders : null} setDemoOrders={isDemo ? setDemoOrders : null} isDemo={isDemo} />
+      )}
+
+      {/* ORDERING WALKTHROUGH GUIDE — rendered here, at the demo shell level,
+          rather than inside PatronView, because steps 3-4 span a tab switch
+          (PATRON → BAR → PATRON) and the card has to survive that.
+          The TICKETS tab runs its own track and renders its own guide. */}
+      {isDemo && !isAdmin && !isQR && !isBuy && !isCheckin && demoView !== "tickets" && (
+        <DemoStepGuide venue={venue} BRAND={BRAND} track="ordering" />
       )}
     </div>
   );
@@ -749,7 +763,7 @@ if (isVenueTerms) return <VenueTerms />;
 // PATRON VIEW
 // ============================================
 
-function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
+function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders, isDemo }) {
   const [cart, setCart] = useState([]);
   const [view, setView] = useState(() => {
     if (demoOrders && demoOrders.length > 0) return "confirmation";
@@ -919,6 +933,10 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
     const modKey = modifiers.map((m) => `${m.group}:${m.option}`).sort().join("|");
     const cartKey = `${item.id}_${modKey}_${itemNotes}`;
 
+    // Demo walkthrough: something's in the cart, so the next instruction is
+    // "open your cart and place the order". No-ops outside the demo venue.
+    if (isDemo) advanceDemoStep("ordering", 2);
+
     setCart((prev) => {
       const ex = prev.find((c) => c.cartKey === cartKey);
       if (ex) return prev.map((c) => (c.cartKey === cartKey ? { ...c, qty: c.qty + 1 } : c));
@@ -1070,6 +1088,9 @@ function PatronView({ venue, menu, BRAND, demoOrders, setDemoOrders }) {
       setCustomTip("");
       setShowCustomTip(false);
       setView("confirmation");
+      // Demo walkthrough: the order is live in the queue — send them to the
+      // BAR tab to see it land on the staff side.
+      if (isDemo) advanceDemoStep("ordering", 3);
     } catch (err) {
       console.error("Payment/order error:", err);
       setProcessingStep("");

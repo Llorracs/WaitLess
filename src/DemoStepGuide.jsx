@@ -5,124 +5,147 @@
  *
  * FILE: src/DemoStepGuide.jsx
  *
- * A small persistent card pinned to the bottom of the screen telling the
- * visitor what to do next in the /demo ticketing walkthrough.
+ * A small persistent card pinned to the bottom of the screen telling a
+ * visitor what to do next, so the /demo venue can be handed to someone
+ * cold and drive itself.
+ *
+ * TWO INDEPENDENT TRACKS:
+ *   "ordering" — the mobile ordering loop (PATRON → BAR → PATRON)
+ *   "tickets"  — the paperless ticketing loop (buy → scan → scan again)
+ * Each keeps its own step in its own localStorage key, so poking at one
+ * doesn't disturb the other and either can be replayed on its own.
  *
  * WHY STATE LIVES IN localStorage, NOT REACT:
- *   The walkthrough spans two separate pages — the TICKETS tab of /demo
- *   (DemoTicketsView) and /demo/checkin (CheckInView), which the user opens
- *   in a SECOND TAB so they can scan the QR off the first screen. React state
- *   can't cross that boundary. So the current step is persisted under
- *   DEMO_STEP_KEY and synced two ways:
+ *   Both tracks span more than one screen, and the ticketing track spans
+ *   two BROWSER TABS — the visitor opens /demo/checkin separately so they
+ *   can scan the QR shown on the first screen. React state can't cross
+ *   that. So the step is persisted and synced two ways:
  *     - across tabs via the native 'storage' event
  *     - within a tab via a custom 'waitless-demo-step' event, because
- *       'storage' deliberately does not fire in the tab that wrote the value
+ *       'storage' deliberately does not fire in the tab that wrote it
  *
- * DESIGN CONSTRAINTS (per spec):
+ * DESIGN CONSTRAINTS:
  *   - Never a full-screen modal, never a dark scrim
- *   - The wrapper is pointerEvents:none so taps pass through everywhere
- *     except the card itself, which re-enables pointer events for its buttons
- *   - Sits above the iOS safe area, and accepts bottomOffset so the check-in
- *     screen can lift it clear of the camera caption pill
+ *   - Wrapper is pointerEvents:none so taps pass through everywhere except
+ *     the card itself, which re-enables them for its own buttons
+ *   - Sits above the iOS safe area; bottomOffset lifts it clear of other
+ *     bottom-pinned UI (the check-in camera caption, the patron cart bar)
  *   - Renders ONLY on the venue whose slug is exactly 'demo'
- *
- * STEP MAP:
- *   1. Pick a ticket                 (DemoTicketsView)
- *   2. Scan the QR at the door       (advances automatically once issued)
- *   3. Scan the SAME ticket again    (advances on first successful check-in)
  * ============================================
  */
 
 import { useState, useEffect, useCallback } from "react";
 
 // ============================================================================
-// SHARED STEP STATE
+// TRACK DEFINITIONS
 // ============================================================================
-
-export const DEMO_STEP_KEY = "waitless_demo_step";
-const DEMO_STEP_EVENT = "waitless-demo-step";
-const TOTAL_STEPS = 3;
 
 // The venue slug this guide is allowed to appear on. Anything else renders
 // nothing — a real venue must never see demo chrome.
 const DEMO_SLUG = "demo";
 
-function readState() {
+const TRACKS = {
+  ordering: {
+    key: "waitless_demo_step_ordering",
+    steps: [
+      { text: "Tap any drink to add it to your order." },
+      { text: "Open your cart and place the order." },
+      { text: "Now tap BAR at the top — your order is already there." },
+      // The payoff: the loop closing back on the patron's own screen.
+      { text: "Mark it ready, then tap PATRON to watch it turn green.", emphasized: true },
+    ],
+  },
+  tickets: {
+    key: "waitless_demo_step_tickets",
+    steps: [
+      { text: "Pick a ticket, then tap Get a Free Demo Ticket." },
+      { text: "Open the door scanner and scan your QR code." },
+      // Spec: this exact string, visually emphasized.
+      { text: "Now scan the same ticket again.", emphasized: true },
+    ],
+  },
+};
+
+const DEMO_STEP_EVENT = "waitless-demo-step";
+
+// ============================================================================
+// SHARED STEP STATE
+// ============================================================================
+
+function trackConfig(track) {
+  return TRACKS[track] || TRACKS.ordering;
+}
+
+function readState(track) {
+  const cfg = trackConfig(track);
+  const total = cfg.steps.length;
   try {
-    const raw = localStorage.getItem(DEMO_STEP_KEY);
+    const raw = localStorage.getItem(cfg.key);
     if (!raw) return { step: 1, dismissed: false };
     const parsed = JSON.parse(raw);
-    const step = Math.min(TOTAL_STEPS, Math.max(1, parseInt(parsed?.step, 10) || 1));
+    const step = Math.min(total, Math.max(1, parseInt(parsed?.step, 10) || 1));
     return { step, dismissed: parsed?.dismissed === true };
   } catch {
     return { step: 1, dismissed: false };
   }
 }
 
-function writeState(next) {
+function writeState(track, next) {
+  const cfg = trackConfig(track);
   try {
-    localStorage.setItem(DEMO_STEP_KEY, JSON.stringify(next));
+    localStorage.setItem(cfg.key, JSON.stringify(next));
   } catch {
     // Private-mode / quota failures are non-fatal — the guide just won't persist.
   }
   try {
-    window.dispatchEvent(new CustomEvent(DEMO_STEP_EVENT, { detail: next }));
+    window.dispatchEvent(new CustomEvent(DEMO_STEP_EVENT, { detail: { track, ...next } }));
   } catch {}
 }
 
 /**
- * Move the walkthrough to a specific step.
+ * Move a track forward to a specific step.
  *
- * Only ever moves FORWARD on auto-advance, so a visitor who manually stepped
- * back isn't yanked forward again by a stale trigger. Re-opening the guide is
- * handled separately (setDemoStep un-dismisses so the advance is visible).
+ * Only ever moves FORWARD, so someone who manually stepped back to re-read
+ * an instruction isn't yanked ahead by a later trigger. An advance also
+ * un-dismisses the card, so a visitor who closed it still sees the next
+ * instruction appear when they complete something.
  */
-export function advanceDemoStep(step) {
-  const current = readState();
-  if (step <= current.step) return;
-  writeState({ step, dismissed: false });
+export function advanceDemoStep(track, step) {
+  const cfg = trackConfig(track);
+  const current = readState(track);
+  const clamped = Math.min(cfg.steps.length, Math.max(1, step));
+  if (clamped <= current.step) return;
+  writeState(track, { step: clamped, dismissed: false });
 }
 
-/** Explicit set — used by "start over" to reset the walkthrough to step 1. */
-export function resetDemoStep() {
-  writeState({ step: 1, dismissed: false });
+/** Reset a track to step 1 — used by "start over". */
+export function resetDemoStep(track) {
+  writeState(track, { step: 1, dismissed: false });
 }
-
-// ============================================================================
-// COPY
-// ============================================================================
-
-const STEP_COPY = {
-  1: {
-    text: "Pick a ticket, then tap Get a Free Demo Ticket.",
-    emphasized: false,
-  },
-  2: {
-    text: "Open the door scanner and scan your QR code.",
-    emphasized: false,
-  },
-  3: {
-    // Spec: this exact string, visually emphasized.
-    text: "Now scan the same ticket again.",
-    emphasized: true,
-  },
-};
 
 // ============================================================================
 // COMPONENT
 // ============================================================================
 
-export default function DemoStepGuide({ venue, BRAND, bottomOffset = 0 }) {
-  const [state, setState] = useState(() => readState());
+export default function DemoStepGuide({ venue, BRAND, track = "ordering", bottomOffset = 0 }) {
+  const [state, setState] = useState(() => readState(track));
+
+  // Re-read when the track changes, so switching contexts shows that
+  // track's own progress rather than the previous one's.
+  useEffect(() => {
+    setState(readState(track));
+  }, [track]);
 
   // Sync across tabs ('storage') and within this tab (custom event).
   useEffect(() => {
+    const cfg = trackConfig(track);
     function onStorage(e) {
-      if (e.key && e.key !== DEMO_STEP_KEY) return;
-      setState(readState());
+      if (e.key && e.key !== cfg.key) return;
+      setState(readState(track));
     }
-    function onCustom() {
-      setState(readState());
+    function onCustom(e) {
+      if (e.detail?.track && e.detail.track !== track) return;
+      setState(readState(track));
     }
     window.addEventListener("storage", onStorage);
     window.addEventListener(DEMO_STEP_EVENT, onCustom);
@@ -130,24 +153,27 @@ export default function DemoStepGuide({ venue, BRAND, bottomOffset = 0 }) {
       window.removeEventListener("storage", onStorage);
       window.removeEventListener(DEMO_STEP_EVENT, onCustom);
     };
-  }, []);
+  }, [track]);
+
+  const cfg = trackConfig(track);
+  const total = cfg.steps.length;
 
   const goto = useCallback((step) => {
-    const clamped = Math.min(TOTAL_STEPS, Math.max(1, step));
-    writeState({ step: clamped, dismissed: false });
-  }, []);
+    const clamped = Math.min(total, Math.max(1, step));
+    writeState(track, { step: clamped, dismissed: false });
+  }, [track, total]);
 
   const dismiss = useCallback(() => {
-    const current = readState();
-    writeState({ step: current.step, dismissed: true });
-  }, []);
+    const current = readState(track);
+    writeState(track, { step: current.step, dismissed: true });
+  }, [track]);
 
   // Hard gate — demo venue only, never a real one.
   if (venue?.slug !== DEMO_SLUG) return null;
   if (state.dismissed) return null;
 
   const { step } = state;
-  const copy = STEP_COPY[step] || STEP_COPY[1];
+  const copy = cfg.steps[step - 1] || cfg.steps[0];
   const accent = BRAND?.accent || "#d4a843";
   const white = BRAND?.white || "#f5f5f5";
   const gray = BRAND?.gray || "#888";
@@ -157,8 +183,7 @@ export default function DemoStepGuide({ venue, BRAND, bottomOffset = 0 }) {
       style={{
         position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 400,
         display: "flex", justifyContent: "center",
-        // Clear the iOS home indicator, plus any caller-supplied offset
-        // (the check-in screen uses this to sit above its camera caption).
+        // Clear the iOS home indicator, plus any caller-supplied offset.
         padding: `0 12px calc(env(safe-area-inset-bottom, 0px) + ${12 + bottomOffset}px)`,
         // Taps pass straight through the wrapper — only the card itself is
         // interactive, so nothing underneath is blocked.
@@ -189,7 +214,7 @@ export default function DemoStepGuide({ venue, BRAND, bottomOffset = 0 }) {
               letterSpacing: 2, color: accent, marginBottom: 3,
             }}
           >
-            STEP {step} OF {TOTAL_STEPS}
+            STEP {step} OF {total}
           </div>
           <div
             style={{
@@ -217,7 +242,7 @@ export default function DemoStepGuide({ venue, BRAND, bottomOffset = 0 }) {
           <GuideButton
             label="→"
             title="Next step"
-            disabled={step >= TOTAL_STEPS}
+            disabled={step >= total}
             onClick={() => goto(step + 1)}
             color={gray}
           />

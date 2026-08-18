@@ -341,7 +341,7 @@ export default function CheckInView({ venue, BRAND }) {
         // Demo walkthrough: a real check-in just happened, so the guide's
         // next instruction is "scan the same ticket again". No-ops on any
         // venue that isn't 'demo'.
-        if (venue.slug === "demo") advanceDemoStep(3);
+        if (venue.slug === "demo") advanceDemoStep("tickets", 3);
         setFeedback({
           kind: "success",
           text: "CHECKED IN",
@@ -851,7 +851,7 @@ export default function CheckInView({ venue, BRAND }) {
           On the SCAN tab it's lifted clear of the camera caption pill so the
           two don't stack on top of each other. The feedback overlay below
           sits at a higher zIndex, so a green/red flash still covers it. */}
-      <DemoStepGuide venue={venue} BRAND={BRAND} bottomOffset={isScanTab ? 72 : 0} />
+      <DemoStepGuide venue={venue} BRAND={BRAND} track="tickets" bottomOffset={isScanTab ? 72 : 0} />
 
       {/* FEEDBACK OVERLAY — appears over everything when a scan completes */}
       {feedback && (

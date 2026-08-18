@@ -210,7 +210,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
       setStep(2);
       setIssuing(false);
       // Ticket exists — the guide's next instruction is "go scan it".
-      advanceDemoStep(2);
+      advanceDemoStep("tickets", 2);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       console.error("Demo comp ticket failed:", e);
@@ -225,7 +225,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
     setEmail("");
     setIssueError(null);
     setStep(1);
-    resetDemoStep();
+    resetDemoStep("tickets");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -596,7 +596,7 @@ export default function DemoTicketsView({ venue, BRAND }) {
         </>
       )}
 
-      <DemoStepGuide venue={venue} BRAND={BRAND} />
+      <DemoStepGuide venue={venue} BRAND={BRAND} track="tickets" />
     </div>
   );
 }

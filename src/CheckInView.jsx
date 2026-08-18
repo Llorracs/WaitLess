@@ -130,10 +130,16 @@ export default function CheckInView({ venue, BRAND }) {
   // When the current presentation of a code began — latched, so a ticket
   // re-presented while a result is still on screen isn't lost.
   const presentationRef = useRef({ token: null, startedAt: 0 });
+  const decodeCountRef = useRef(0);
   // The last token we actually ran a check-in for.
   const lastProcessedRef = useRef({ token: null, at: 0 });
   // Bumped by the watchdog to force the camera to rebuild.
   const [cameraNudge, setCameraNudge] = useState(0);
+  // Live camera health, surfaced on the demo venue so a failure can be
+  // reported precisely instead of as "it stopped working".
+  const [camStatus, setCamStatus] = useState("starting");
+  // Count of decodes seen, as evidence the pipeline is actually working.
+  const [decodeCount, setDecodeCount] = useState(0);
 
   // The scanner's decode callback is created once and lives as long as the
   // camera does, so it can't close over `feedback` or `handleScannedToken`
@@ -313,6 +319,11 @@ export default function CheckInView({ venue, BRAND }) {
             const now = Date.now();
             const prev = presenceRef.current;
 
+            // Ref only — never setState here. This fires ~10x/second while a
+            // code is in frame, and re-rendering at that rate janks the feed.
+            // The watchdog samples it every few seconds instead.
+            decodeCountRef.current += 1;
+
             // A code counts as newly presented if it's a different code, or
             // if we lost sight of this one long enough that it must have been
             // taken away and shown again.
@@ -378,22 +389,71 @@ export default function CheckInView({ venue, BRAND }) {
     if (!authenticated || !selectedEvent) return;
     if (activeTab !== "scan") return;
 
+    let lastTime = -1;
+    let stalls = 0;
+
     const id = setInterval(() => {
       const scanner = scannerRef.current;
-      if (!scanner || typeof scanner.getState !== "function") return;
+      const host = document.getElementById(scannerDivId);
+      const video = host?.querySelector("video");
+
+      // No video element at all — the feed is definitely gone.
+      if (!video) {
+        setCamStatus("no-video");
+        setCameraNudge((n) => n + 1);
+        return;
+      }
+
+      // iOS pauses the element outright on interruptions (a call, memory
+      // pressure, backgrounding). Nudging play() usually revives it without
+      // a full teardown.
+      if (video.paused) {
+        video.play().catch(() => {});
+      }
+
+      // If the underlying camera track has ended, play() can't help.
+      const track = video.srcObject?.getVideoTracks?.()?.[0];
+      if (track && track.readyState !== "live") {
+        setCamStatus("track-ended");
+        setCameraNudge((n) => n + 1);
+        return;
+      }
+
+      // The decisive check: a live camera's currentTime always advances.
+      // If it's static across consecutive ticks the feed is frozen — which
+      // looks completely normal on screen (last frame still painted) while
+      // decoding nothing. This is the state getState() misses.
+      if (video.currentTime === lastTime) {
+        stalls += 1;
+        if (stalls >= 2) {
+          setCamStatus("frozen");
+          stalls = 0;
+          setCameraNudge((n) => n + 1);
+          return;
+        }
+      } else {
+        stalls = 0;
+      }
+      lastTime = video.currentTime;
+
       try {
         // html5-qrcode state enum: 1 NOT_STARTED, 2 SCANNING, 3 PAUSED
-        if (scanner.getState() !== 2) {
-          console.warn("QR scanner not in SCANNING state — restarting");
+        if (typeof scanner?.getState === "function" && scanner.getState() !== 2) {
+          setCamStatus("not-scanning");
           setCameraNudge((n) => n + 1);
+          return;
         }
       } catch {
         setCameraNudge((n) => n + 1);
+        return;
       }
+
+      setCamStatus("live");
+      setDecodeCount(decodeCountRef.current);
     }, CAMERA_WATCHDOG_MS);
 
     return () => clearInterval(id);
-  }, [authenticated, selectedEvent, activeTab]);
+  }, [authenticated, selectedEvent, activeTab, cameraNudge]);
 
   // ==========================================================================
   // SCAN HANDLER
@@ -849,6 +909,20 @@ export default function CheckInView({ venue, BRAND }) {
             </span>
             {/* Manual escape hatch — never leave someone stuck staring at a
                 frozen feed with no way to recover. */}
+            {/* Camera health — demo venue only. Turns "it stopped working"
+                into something specific: whether the feed is live, frozen, or
+                gone, and whether decodes are still arriving. */}
+            {venue.slug === "demo" && (
+              <span style={{
+                background: "rgba(10,10,10,0.6)", backdropFilter: "blur(10px)", WebkitBackdropFilter: "blur(10px)",
+                padding: "10px 12px", borderRadius: 20, border: "1px solid rgba(255,255,255,0.1)",
+                fontSize: 10, fontFamily: "'Space Mono', monospace", letterSpacing: 1,
+                color: camStatus === "live" ? BRAND.success : BRAND.warning,
+                whiteSpace: "nowrap",
+              }}>
+                {camStatus.toUpperCase()} · {decodeCount}
+              </span>
+            )}
             <button
               onClick={() => setCameraNudge((n) => n + 1)}
               title="Restart camera"

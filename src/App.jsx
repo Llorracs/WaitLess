@@ -67,6 +67,7 @@ import { PrivacyPolicy, TermsOfService, RefundPolicy, VenueTerms } from "./Legal
 import BuyTicketsView from "./BuyTicketsView";
 import BuyConfirmationView from "./BuyConfirmationView";
 import CheckInView from "./CheckInView";
+import DemoTicketsView from "./DemoTicketsView";
 
 // ============================================
 // URL PARSING
@@ -692,6 +693,7 @@ if (isVenueTerms) return <VenueTerms />;
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {[
               { key: "patron", label: "PATRON", color: "#D4A843" },
+              { key: "tickets", label: "TICKETS", color: "#9b59b6" },
               { key: "manager", label: "MANAGER", color: "#1E4D8C" },
               { key: "bartender", label: "BAR", color: "#e91e8c" },
               { key: "kitchen", label: "KITCHEN", color: "#2ecc71" },
@@ -728,6 +730,8 @@ if (isVenueTerms) return <VenueTerms />;
         <AdminView venue={venue} BRAND={BRAND} />
       ) : isQR ? (
         <QRGenerator venue={venue} BRAND={BRAND} />
+      ) : isDemo && demoView === "tickets" ? (
+        <DemoTicketsView venue={venue} BRAND={BRAND} />
       ) : isKitchen || (isDemo && demoView === "kitchen") ? (
         <KitchenDisplay venue={venue} BRAND={BRAND} stationFilter="kitchen" />
       ) : isBartender || (isDemo && demoView === "bartender") ? (

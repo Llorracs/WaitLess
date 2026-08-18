@@ -38,6 +38,7 @@ import {
   verifyBartenderPin,
 } from "./lib/barOrderService";
 import { Html5Qrcode } from "html5-qrcode";
+import DemoStepGuide, { advanceDemoStep } from "./DemoStepGuide";
 
 // ============================================================================
 // CONSTANTS
@@ -337,6 +338,10 @@ export default function CheckInView({ venue, BRAND }) {
       // RPC returns jsonb with ok=true/false
       if (data?.ok) {
         vibrateSuccess();
+        // Demo walkthrough: a real check-in just happened, so the guide's
+        // next instruction is "scan the same ticket again". No-ops on any
+        // venue that isn't 'demo'.
+        if (venue.slug === "demo") advanceDemoStep(3);
         setFeedback({
           kind: "success",
           text: "CHECKED IN",
@@ -841,6 +846,12 @@ export default function CheckInView({ venue, BRAND }) {
           )}
         </div>
       )}
+
+      {/* DEMO WALKTHROUGH GUIDE — renders only on the 'demo' venue.
+          On the SCAN tab it's lifted clear of the camera caption pill so the
+          two don't stack on top of each other. The feedback overlay below
+          sits at a higher zIndex, so a green/red flash still covers it. */}
+      <DemoStepGuide venue={venue} BRAND={BRAND} bottomOffset={isScanTab ? 72 : 0} />
 
       {/* FEEDBACK OVERLAY — appears over everything when a scan completes */}
       {feedback && (

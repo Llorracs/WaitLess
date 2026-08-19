@@ -59,8 +59,8 @@ export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
  * Columns safe to hand to an anonymous visitor.
  *
  * Deliberately EXCLUDES square_access_token, square_refresh_token,
- * square_webhook_signature_key, square_merchant_id, bartender_pin and
- * owner_email. This used to be select('*'), which handed every one of those
+ * square_webhook_signature_key, square_merchant_id, the staff PINs
+ * (bartender_pin, manager_pin, door_pin) and owner_email. This used to be select('*'), which handed every one of those
  * to every browser that loaded a venue page.
  *
  * square_app_id and square_location_id stay: they're publishable
@@ -128,7 +128,7 @@ export async function fetchCheckinStats(eventId, venueId) {
 }
 
 /**
- * Owner-only venue settings (PIN + Square credentials).
+ * Owner-only venue settings (staff PINs + Square credentials).
  *
  * Requires a signed-in owner session — the admin screens use real Supabase
  * Auth, so these run as the `authenticated` role rather than `anon`, which
@@ -140,7 +140,7 @@ export async function fetchCheckinStats(eventId, venueId) {
 export async function getVenueOwnerSettings(venueId) {
   const { data, error } = await supabase
     .from('venues')
-    .select('bartender_pin, square_app_id, square_access_token, square_location_id, square_environment')
+    .select('bartender_pin, manager_pin, door_pin, square_app_id, square_access_token, square_location_id, square_environment')
     .eq('id', venueId)
     .single();
 
@@ -166,18 +166,39 @@ export async function getVenueMenu(venueId) {
 }
 
 /**
- * Verify bartender PIN for a venue.
- * 
+ * Verify a staff PIN for a venue, for one role.
+ *
+ * Roles: 'manager' (order queue), 'door' (check-in scanner), 'bartender'.
+ * A venue that hasn't set a role-specific PIN falls back to the legacy
+ * shared `bartender_pin`, so this is a no-op for existing venues — the
+ * fallback lives in the RPC, not here.
+ *
+ * The PIN is never returned to the browser; only the boolean is.
+ *
  * @param {string} venueId - The venue UUID
  * @param {string} pin - The PIN entered
+ * @param {string} role - Which screen is asking
  * @returns {boolean} Whether the PIN matches
  */
-export async function verifyBartenderPin(venueId, pin) {
+export async function verifyStaffPin(venueId, pin, role) {
   const { data, error } = await supabase
-    .rpc('verify_bartender_pin', { p_venue_id: venueId, p_pin: pin });
+    .rpc('verify_staff_pin', { p_venue_id: venueId, p_pin: pin, p_role: role });
 
-  if (error) throw error;
-  return data;
+  if (!error) return data;
+
+  // supabase/staff-pins-step1-per-role.sql hasn't been run yet — PostgREST
+  // reports an unknown function as PGRST202. Fall back to the old single-PIN
+  // check so deploying ahead of the migration can't lock staff out mid-service.
+  // Delete this branch once the migration has run in production.
+  if (error.code === 'PGRST202') {
+    console.warn('verify_staff_pin missing; falling back to verify_bartender_pin');
+    const { data: legacy, error: legacyError } = await supabase
+      .rpc('verify_bartender_pin', { p_venue_id: venueId, p_pin: pin });
+    if (legacyError) throw legacyError;
+    return legacy;
+  }
+
+  throw error;
 }
 
 /**

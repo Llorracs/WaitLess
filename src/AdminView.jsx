@@ -1163,6 +1163,8 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
     name: venue.name || "",
     tagline: venue.tagline || "",
     bartender_pin: venue.bartender_pin || "0000",
+    manager_pin: "",
+    door_pin: "",
     service_fee_percent: venue.service_fee_percent || 5,
     patron_font: venue.patron_font || "Inter",
     primary: venue.brand_colors?.primary || "#1E4D8C",
@@ -1170,20 +1172,24 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
     background: venue.brand_colors?.background || "#0a0a0a",
   });
 
-  // The PIN is no longer part of the public venue payload — it's owner-only,
-  // fetched here against the signed-in admin session. Without this the field
-  // would silently reset to 0000 and saving would overwrite the real PIN.
+  // The PINs are not part of the public venue payload — they're owner-only,
+  // fetched here against the signed-in admin session. Without this the fields
+  // would silently reset and saving would overwrite the real PINs.
   const [pinLoaded, setPinLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const settings = await getVenueOwnerSettings(venue.id);
-      if (cancelled) return;
-      if (settings?.bartender_pin) {
-        setForm((f) => ({ ...f, bartender_pin: settings.bartender_pin }));
-        setPinLoaded(true);
-      }
+      if (cancelled || !settings) return;
+      setForm((f) => ({
+        ...f,
+        bartender_pin: settings.bartender_pin || f.bartender_pin,
+        // Blank means "unset" — the role falls back to the bartender PIN.
+        manager_pin: settings.manager_pin || "",
+        door_pin: settings.door_pin || "",
+      }));
+      setPinLoaded(true);
     })();
     return () => { cancelled = true; };
   }, [venue.id]);
@@ -1193,10 +1199,17 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
       .update({
         name: form.name,
         tagline: form.tagline,
-        // Omit the PIN until the owner-only fetch has confirmed the real
-        // one. The field defaults to "0000", so saving before it lands
-        // would silently reset the PIN and lock staff out.
-        ...(pinLoaded ? { bartender_pin: form.bartender_pin } : {}),
+        // Omit the PINs until the owner-only fetch has confirmed the real
+        // ones. The bartender field defaults to "0000" and the role fields
+        // to blank, so saving before they land would silently reset the
+        // PINs and lock staff out.
+        // A blank role PIN is written as NULL, not "", so verify_staff_pin
+        // treats it as unset and falls back to the bartender PIN.
+        ...(pinLoaded ? {
+          bartender_pin: form.bartender_pin,
+          manager_pin: form.manager_pin || null,
+          door_pin: form.door_pin || null,
+        } : {}),
         service_fee_percent: form.service_fee_percent,
         patron_font: form.patron_font,
         brand_colors: {
@@ -1239,6 +1252,23 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
           <input type="number" step="0.5" min="0" max="30" value={form.service_fee_percent} onChange={(e) => setForm({ ...form, service_fee_percent: parseFloat(e.target.value || 0) })} style={S.input} />
         </div>
       </div>
+      {/* Optional per-role PINs. Blank = that screen keeps using the
+          bartender PIN above, which is why nothing breaks on upgrade. */}
+      <div style={S.settingsRow}>
+        <div style={S.settingsField}>
+          <label style={S.label}>Manager PIN</label>
+          <input type="text" maxLength={4} value={form.manager_pin} onChange={(e) => setForm({ ...form, manager_pin: e.target.value.replace(/\D/g, "").slice(0, 4) })} style={S.input} placeholder="Optional" />
+        </div>
+        <div style={S.settingsField}>
+          <label style={S.label}>Door PIN</label>
+          <input type="text" maxLength={4} value={form.door_pin} onChange={(e) => setForm({ ...form, door_pin: e.target.value.replace(/\D/g, "").slice(0, 4) })} style={S.input} placeholder="Optional" />
+        </div>
+      </div>
+      <p style={S.settingsHint}>
+        Manager PIN opens the order queue, Door PIN opens the ticket scanner.
+        Leave either blank to keep using the bartender PIN for that screen.
+        Once you set one, the bartender PIN no longer opens it.
+      </p>
      <div style={S.settingsField}>
         <label style={S.label}>Patron Menu Font</label>
         <select
@@ -1668,6 +1698,7 @@ const S = {
   settingsGrid: { display: "flex", flexDirection: "column", gap: 16 },
   settingsField: { display: "flex", flexDirection: "column", gap: 6 },
   settingsRow: { display: "flex", gap: 16 },
+  settingsHint: { fontFamily: "'Inter', sans-serif", fontSize: 12, lineHeight: 1.5, color: "#777", margin: "-6px 0 0" },
   // Colors
   colorRow: { display: "flex", gap: 12, flexWrap: "wrap" },
   colorField: { display: "flex", flexDirection: "column", gap: 4 },

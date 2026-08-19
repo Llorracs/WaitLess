@@ -40,7 +40,7 @@ import {
   getVenueBySlug,
   getVenueMenu,
   getMenuItemModifiers,
-  verifyBartenderPin,
+  verifyStaffPin,
   generateUniqueConfirmation,
   createBarOrder,
   subscribeToOrder,
@@ -1629,7 +1629,9 @@ function BartenderView({ venue, BRAND }) {
   const [verifyOrder, setVerifyOrder] = useState(null);
 
   const handlePinCheck = async (fullPin) => {
-    const valid = await verifyBartenderPin(venue.id, fullPin);
+    // This component is what /manager renders, so it gates on the manager
+    // PIN — falling back to the shared bartender PIN when none is set.
+    const valid = await verifyStaffPin(venue.id, fullPin, "manager");
     if (valid) {
       setAuthenticated(true);
       setPinError(false);

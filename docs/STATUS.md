@@ -5,19 +5,33 @@ coding session.
 
 ## Next up, in order
 
-1. **Per-role staff PINs** — `docs/plan-per-role-staff-pins.md`.
-   Promoted to a security prerequisite: it's what makes closing `bar_orders`
-   possible without taking the bar offline mid-service.
-2. **Close `bar_orders` RLS** — phase 3 of that same plan.
-3. **Offline order queue** — `docs/plan-offline-order-queue.md`. Owner's stated
+1. **Run `supabase/staff-pins-step1-per-role.sql`** and deploy — per-role
+   staff PINs phase 1 is built but not live. Safe migration: adds two nullable
+   columns and one function, revokes nothing. Then drop the old
+   `verify_bartender_pin` (step 3 in that file).
+2. **Per-staff PINs** — phase 2 of `docs/plan-per-role-staff-pins.md`. This is
+   the one that gives staff screens a real session, which is what actually
+   unblocks the next item.
+3. **Close `bar_orders` RLS** — phase 3 of that same plan.
+4. **Offline order queue** — `docs/plan-offline-order-queue.md`. Owner's stated
    priority. Build on a branch; it rewrites the live payment path.
 
 ## Open issues
 
 - **`bar_orders` is publicly readable and publicly updatable.**
   `"Anyone can read orders" SELECT | true` and
-  `"Staff can update orders" UPDATE | true`. Blocked on per-role staff PINs —
-  see above. This is the last known open hole.
+  `"Staff can update orders" UPDATE | true`. Still blocked: per-role PINs are
+  a UI-side identity only — the staff screens still hit Postgres as `anon`, so
+  there's nothing to scope a policy to until phase 2's staff session exists.
+  This is the last known open hole.
+- **Staff PINs are plaintext and unthrottled.** `bartender_pin`, `manager_pin`
+  and `door_pin` store the PIN as typed, and `verify_staff_pin` is callable by
+  `anon` with no rate limit — 4 digits is 10,000 guesses. Hashing is unblocked
+  on the auth path (verification is already an RPC); the blocker is the admin
+  UI displaying the current PIN, which would have to become set-only.
+- **`/bartender` and `/kitchen` have no PIN gate at all.** They render
+  `KitchenDisplay`, a read-only queue board — anyone with the URL sees live
+  order detail. May be intended (wall-mounted screens); worth a decision.
 - **`authenticated` can still read other venues' secrets.** One signed-in venue
   owner can read another venue's `square_access_token`. Much narrower than the
   anonymous exposure that was closed, but still wrong. Fix documented at the
@@ -35,6 +49,10 @@ coding session.
 
 ## Closed recently (Aug 2026)
 
+- **Per-role staff PINs, phase 1** — `manager_pin` / `door_pin` columns, a
+  role-aware `verify_staff_pin` RPC with fallback to the shared
+  `bartender_pin`, and optional PIN fields in Admin → Settings. Built but not
+  yet live; see "Next up".
 - **All Netlify functions were returning 502 in production.** `package.json` has
   `"type": "module"`, so the CommonJS `.js` function files were parsed as ESM
   and crashed on load. Renamed to `.cjs`. This had taken down payments and
@@ -64,9 +82,14 @@ coding session.
   idx=$(curl -s https://waitless.events/ | grep -o '/assets/index-[A-Za-z0-9_-]*\.js' | head -1)
   curl -s "https://waitless.events$idx" | grep -c "some-new-string"
   ```
-- **Staff screens run as `anon`.** Bartender, kitchen, manager and door are
-  PIN-gated in the UI only; the database can't tell them from a stranger.
-  That's the root cause behind the remaining RLS problems.
+- **Staff screens run as `anon`.** Manager and door are PIN-gated in the UI
+  only (bartender and kitchen aren't gated at all); the database can't tell any
+  of them from a stranger. That's the root cause behind the remaining RLS
+  problems, and per-role PINs don't change it — they split one shared code into
+  three, but the session is still `anon`.
+- **The `/manager` route renders a component called `BartenderView`.** The
+  names don't line up; `KitchenDisplay` is what `/bartender` and `/kitchen`
+  actually render.
 - **Admin screens do use real Supabase Auth**, so they're the `authenticated`
   role — which is why the venues lockdown didn't break them.
 - **SQL migrations live in `supabase/`** and are written to be run by hand in

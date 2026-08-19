@@ -7,11 +7,12 @@
  *
  * Route: /{venueSlug}/checkin
  *
- * Door-staff facing scanner. PIN-gated using the venue's bartender_pin
- * (same one used for /manager and other staff views — set in admin).
+ * Door-staff facing scanner. PIN-gated on the venue's door_pin, falling
+ * back to the shared bartender_pin when no door PIN is set — both set in
+ * admin.
  *
  * Flow:
- *   1. PIN gate (verifyBartenderPin against venues.bartender_pin)
+ *   1. PIN gate (verifyStaffPin with role 'door')
  *   2. Event picker — staff selects which event they're working the door for
  *      (auto-selects if only one event is within ±12 hours)
  *   3. Scanner — camera feed via html5-qrcode, scans continuously
@@ -35,7 +36,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   supabase,
-  verifyBartenderPin,
+  verifyStaffPin,
   fetchCheckinStats,
 } from "./lib/barOrderService";
 import { Html5Qrcode } from "html5-qrcode";
@@ -157,7 +158,7 @@ export default function CheckInView({ venue, BRAND }) {
   // PIN HANDLER
   // ==========================================================================
   const handlePinCheck = async (fullPin) => {
-    const valid = await verifyBartenderPin(venue.id, fullPin);
+    const valid = await verifyStaffPin(venue.id, fullPin, "door");
     if (valid) {
       setAuthenticated(true);
       setPinError(false);

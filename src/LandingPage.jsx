@@ -325,11 +325,65 @@ export default function LandingPage() {
           </div>
         </div>
 
+        {/* Ticketing break-even comparison.
+            A flat monthly rate has no anchor next to competitors that quote
+            per-ticket fees — the buyer's default mental model is "free to
+            start." This puts the comparison on the page so they run the real
+            math instead of assuming a flat fee is the expensive option. */}
+        <div style={S.compareBox}>
+          <p style={S.compareTitle}>WHAT TICKETING NORMALLY COSTS YOU</p>
+          <p style={S.compareLead}>
+            Most ticketing platforms take a cut of every ticket — around{" "}
+            <strong style={{ color: "#fff" }}>$2.50 on a $20 ticket</strong>, forever.
+            We charge one flat rate and <strong style={{ color: "#fff" }}>never touch a ticket</strong>.
+          </p>
+
+          <div style={S.compareTable}>
+            <div style={S.compareHead}>
+              <span>TICKETS / MONTH</span>
+              <span style={{ textAlign: "right" }}>TYPICAL FEES</span>
+              <span style={{ textAlign: "right" }}>WAITLESS</span>
+            </div>
+            {[
+              { tickets: "40", fees: "~$100", flat: "$199", note: null },
+              { tickets: "80", fees: "~$200", flat: "$199", note: "break even" },
+              { tickets: "200", fees: "~$500", flat: "$199", note: null },
+              { tickets: "400", fees: "~$1,000", flat: "$199", note: null },
+            ].map((row) => {
+              const winning = row.note !== "break even" && parseInt(row.tickets, 10) > 80;
+              return (
+                <div key={row.tickets} style={S.compareRow}>
+                  <span style={{ color: "#ccc" }}>
+                    {row.tickets}
+                    {row.note && (
+                      <span style={S.breakEvenTag}>{row.note}</span>
+                    )}
+                  </span>
+                  <span style={{ textAlign: "right", color: winning ? "#e74c3c" : "#888" }}>
+                    {row.fees}
+                  </span>
+                  <span style={{ textAlign: "right", color: winning ? "#2ecc71" : "#ccc", fontWeight: winning ? 700 : 400 }}>
+                    {row.flat}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <p style={S.compareKicker}>
+            Past roughly 80 tickets a month, <strong style={{ color: "#2ecc71" }}>every ticket you sell is free</strong> —
+            and the customer list stays yours, not the platform's.
+          </p>
+          <p style={S.compareFootnote}>
+            Comparison based on typical published platform rates on a $20 ticket. Actual fees vary by platform and ticket price.
+          </p>
+        </div>
+
         {/* ROI callout */}
-        <div style={{ maxWidth: 600, margin: "32px auto 0", padding: "20px 24px", background: "#0a0a0a", borderRadius: 14, border: "1px solid #1a1a1a", textAlign: "center" }}>
-          <p style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, color: "#d4a843", margin: "0 0 8px" }}>THE MATH</p>
+        <div style={{ maxWidth: 600, margin: "20px auto 0", padding: "20px 24px", background: "#0a0a0a", borderRadius: 14, border: "1px solid #1a1a1a", textAlign: "center" }}>
+          <p style={{ fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600, letterSpacing: 2, color: "#d4a843", margin: "0 0 8px" }}>AND ON THE BAR SIDE</p>
           <p style={{ fontSize: 14, color: "#ccc", lineHeight: 1.8, margin: 0 }}>
-            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#1E4D8C" }}>$480+ in additional monthly revenue</strong>. Add in ticket sales with zero per-ticket fees, and Waitless pays for itself in a single busy weekend.
+            A venue serving 10 extra customers per event at $12 average = <strong style={{ color: "#1E4D8C" }}>$480+ in additional monthly revenue</strong>. Between drinks and tickets, Waitless pays for itself in a single busy weekend.
           </p>
         </div>
       </section>
@@ -590,6 +644,43 @@ const S = {
     padding: "14px", borderRadius: 10, border: "1px solid #333", background: "transparent",
     color: "#f5f5f5", fontFamily: "'Oswald', sans-serif", fontSize: 14, fontWeight: 600,
     letterSpacing: 2, cursor: "pointer", textAlign: "center", textDecoration: "none",
+  },
+
+  // Ticketing cost comparison
+  compareBox: {
+    maxWidth: 600, margin: "32px auto 0", padding: "24px",
+    background: "#0a0a0a", borderRadius: 14, border: "1px solid #1E4D8C33",
+  },
+  compareTitle: {
+    fontFamily: "'Oswald', sans-serif", fontSize: 16, fontWeight: 600,
+    letterSpacing: 2, color: "#d4a843", margin: "0 0 10px", textAlign: "center",
+  },
+  compareLead: {
+    fontSize: 14, color: "#999", lineHeight: 1.7, margin: "0 0 20px",
+    textAlign: "center", fontWeight: 300,
+  },
+  compareTable: { display: "flex", flexDirection: "column", gap: 2 },
+  compareHead: {
+    display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 8,
+    fontFamily: "'Space Mono', monospace", fontSize: 9, letterSpacing: 1,
+    color: "#666", paddingBottom: 8, borderBottom: "1px solid #1a1a1a",
+  },
+  compareRow: {
+    display: "grid", gridTemplateColumns: "1.4fr 1fr 1fr", gap: 8,
+    fontFamily: "'Space Mono', monospace", fontSize: 13,
+    padding: "10px 0", borderBottom: "1px solid #111", alignItems: "center",
+  },
+  breakEvenTag: {
+    marginLeft: 6, padding: "2px 6px", borderRadius: 4,
+    background: "#d4a84322", border: "1px solid #d4a84344",
+    fontSize: 8, color: "#d4a843", letterSpacing: 1, whiteSpace: "nowrap",
+  },
+  compareKicker: {
+    fontSize: 14, color: "#ccc", lineHeight: 1.7, margin: "18px 0 0", textAlign: "center",
+  },
+  compareFootnote: {
+    fontSize: 10, color: "#555", lineHeight: 1.5, margin: "12px 0 0",
+    textAlign: "center", fontStyle: "italic",
   },
 
   // Contact

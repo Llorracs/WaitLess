@@ -39,7 +39,7 @@
  * ============================================
  */
 import { useState, useEffect } from "react";
-import { supabase } from "./lib/barOrderService";
+import { supabase, getVenueOwnerSettings } from "./lib/barOrderService";
 import QRGenerator from "./QRGenerator";
 import AnalyticsView from "./AnalyticsView";
 import BillingView from "./BillingView";
@@ -1169,13 +1169,34 @@ function VenueSettings({ venue, setVenue, showSaved, BRAND, vs }) {
     accent: venue.brand_colors?.accent || "#d4a843",
     background: venue.brand_colors?.background || "#0a0a0a",
   });
+
+  // The PIN is no longer part of the public venue payload — it's owner-only,
+  // fetched here against the signed-in admin session. Without this the field
+  // would silently reset to 0000 and saving would overwrite the real PIN.
+  const [pinLoaded, setPinLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const settings = await getVenueOwnerSettings(venue.id);
+      if (cancelled) return;
+      if (settings?.bartender_pin) {
+        setForm((f) => ({ ...f, bartender_pin: settings.bartender_pin }));
+        setPinLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [venue.id]);
   const handleSave = async () => {
     const { error } = await supabase
       .from("venues")
       .update({
         name: form.name,
         tagline: form.tagline,
-        bartender_pin: form.bartender_pin,
+        // Omit the PIN until the owner-only fetch has confirmed the real
+        // one. The field defaults to "0000", so saving before it lands
+        // would silently reset the PIN and lock staff out.
+        ...(pinLoaded ? { bartender_pin: form.bartender_pin } : {}),
         service_fee_percent: form.service_fee_percent,
         patron_font: form.patron_font,
         brand_colors: {
@@ -1298,6 +1319,27 @@ function SquareSettings({ venue, setVenue, showSaved, BRAND, vs }) {
     square_environment: venue.square_environment || "sandbox",
   });
   const [showManual, setShowManual] = useState(false);
+  // Square credentials are owner-only and no longer arrive on the public
+  // venue payload, so load them against the signed-in admin session.
+  const [ownerSettings, setOwnerSettings] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const settings = await getVenueOwnerSettings(venue.id);
+      if (cancelled || !settings) return;
+      setOwnerSettings(settings);
+      setForm((f) => ({
+        ...f,
+        square_app_id: settings.square_app_id || f.square_app_id,
+        square_access_token: settings.square_access_token || "",
+        square_location_id: settings.square_location_id || f.square_location_id,
+        square_environment: settings.square_environment || f.square_environment,
+      }));
+    })();
+    return () => { cancelled = true; };
+  }, [venue.id]);
+
   // Check for OAuth callback result
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -1353,21 +1395,34 @@ function SquareSettings({ venue, setVenue, showSaved, BRAND, vs }) {
     }
   };
   const handleManualSave = async () => {
+    const patch = {
+      square_app_id: form.square_app_id,
+      square_location_id: form.square_location_id,
+      square_environment: form.square_environment,
+    };
+    // Only write the token when one was actually typed. The field starts
+    // empty until the owner-only fetch lands, so blindly sending it would
+    // let a quick save blank out a working Square connection.
+    if (form.square_access_token) {
+      patch.square_access_token = form.square_access_token;
+    }
+
     const { error } = await supabase
       .from("venues")
-      .update({
-        square_app_id: form.square_app_id,
-        square_access_token: form.square_access_token,
-        square_location_id: form.square_location_id,
-        square_environment: form.square_environment,
-      })
+      .update(patch)
       .eq("id", venue.id);
     if (!error) {
       setVenue((prev) => ({ ...prev, ...form }));
       showSaved("Payment settings saved");
     }
   };
-  const isConfigured = venue.square_app_id && venue.square_access_token && venue.square_location_id;
+  // Derived from the owner-only fetch rather than the public venue payload,
+  // which no longer carries the access token.
+  const isConfigured = Boolean(
+    (ownerSettings?.square_app_id || venue.square_app_id) &&
+    ownerSettings?.square_access_token &&
+    (ownerSettings?.square_location_id || venue.square_location_id)
+  );
   return (
     <div style={S.settingsGrid}>
       {/* Status badge — green/gold status colors stay unchanged */}

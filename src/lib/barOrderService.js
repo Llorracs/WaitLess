@@ -55,16 +55,65 @@ export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
  * @param {string} slug - The venue's URL slug (e.g., "trfq")
  * @returns {Object} Venue config (id, name, branding, Square config, etc.)
  */
+/**
+ * Columns safe to hand to an anonymous visitor.
+ *
+ * Deliberately EXCLUDES square_access_token, square_refresh_token,
+ * square_webhook_signature_key, square_merchant_id, bartender_pin and
+ * owner_email. This used to be select('*'), which handed every one of those
+ * to every browser that loaded a venue page.
+ *
+ * square_app_id and square_location_id stay: they're publishable
+ * identifiers the Square browser SDK needs, not secrets.
+ *
+ * KEEP IN SYNC with the column GRANT in supabase/harden-venues-access.sql —
+ * once that migration runs, asking for anything outside this list as an
+ * anonymous user fails the whole request.
+ */
+const PUBLIC_VENUE_COLUMNS = [
+  'id', 'slug', 'name', 'tagline', 'logo_url',
+  'brand_colors', 'patron_font',
+  'service_fee_percent', 'minimum_age', 'require_age_verification',
+  'category_order', 'refund_policy_override',
+  'is_active', 'owner_id',
+  'subscription_status', 'subscription_id', 'trial_ends_at',
+  'square_app_id', 'square_location_id', 'square_environment',
+].join(', ');
+
 export async function getVenueBySlug(slug) {
   const { data, error } = await supabase
     .from('venues')
-    .select('*')
+    .select(PUBLIC_VENUE_COLUMNS)
     .eq('slug', slug)
     .eq('is_active', true)
     .single();
 
   if (error) throw error;
   if (!data) throw new Error(`Venue "${slug}" not found`);
+  return data;
+}
+
+/**
+ * Owner-only venue settings (PIN + Square credentials).
+ *
+ * Requires a signed-in owner session — the admin screens use real Supabase
+ * Auth, so these run as the `authenticated` role rather than `anon`, which
+ * is what keeps these columns out of public reach.
+ *
+ * Returns null rather than throwing when access is denied, so an admin
+ * screen can degrade to "not configured" instead of erroring out.
+ */
+export async function getVenueOwnerSettings(venueId) {
+  const { data, error } = await supabase
+    .from('venues')
+    .select('bartender_pin, square_app_id, square_access_token, square_location_id, square_environment')
+    .eq('id', venueId)
+    .single();
+
+  if (error) {
+    console.warn('Owner settings unavailable (not signed in as owner?):', error.message);
+    return null;
+  }
   return data;
 }
 

@@ -63,7 +63,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from "react";
-import { supabase } from "./lib/barOrderService";
+import { supabase, fetchTicketOrderPublic } from "./lib/barOrderService";
 import QRCode from "qrcode";
 
 // ============================================================================
@@ -142,20 +142,25 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
       }
 
       try {
-        const { data: orderRow, error: orderErr } = await supabase
-          .from("ticket_orders")
-          .select("*")
-          .eq("id", orderId)
-          .maybeSingle();
-
-        if (cancelled) return;
-
-        if (orderErr) {
-          console.error("Failed to load order:", orderErr);
-          setErrorMessage(orderErr.message);
+        // Reads through a SECURITY DEFINER function keyed on the order's
+        // UUID, so the tickets/ticket_orders tables don't have to be
+        // publicly readable. Returns the tickets alongside the order, so
+        // loadEventAndTickets can reuse them instead of re-querying.
+        let orderRow = null;
+        let prefetchedTickets = [];
+        try {
+          const res = await fetchTicketOrderPublic(orderId);
+          orderRow = res.order;
+          prefetchedTickets = res.tickets;
+        } catch (rpcErr) {
+          if (cancelled) return;
+          console.error("Failed to load order:", rpcErr);
+          setErrorMessage(rpcErr.message);
           setPhase("error");
           return;
         }
+
+        if (cancelled) return;
 
         if (!orderRow) {
           setPhase("not_found");
@@ -175,12 +180,12 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
         // Branch based on order status
         if (orderRow.status === "paid") {
           // Webhook has already landed — load tickets immediately
-          await loadEventAndTickets(orderRow);
+          await loadEventAndTickets(orderRow, prefetchedTickets);
         } else if (orderRow.status === "pending") {
           // Webhook hasn't landed yet — start polling
           setPhase("polling");
         } else if (orderRow.status === "refunded") {
-          await loadEventAndTickets(orderRow); // Load anyway so we can show event details
+          await loadEventAndTickets(orderRow, prefetchedTickets); // Load anyway so we can show event details
           setPhase("refunded");
         } else if (orderRow.status === "failed") {
           setPhase("failed");
@@ -209,12 +214,18 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
     if (phase !== "polling") return;
 
     async function pollForPayment() {
-      // Re-fetch the order row to see if the webhook has landed
-      const { data: orderRow, error: orderErr } = await supabase
-        .from("ticket_orders")
-        .select("*")
-        .eq("id", orderId)
-        .maybeSingle();
+      // Re-fetch the order to see if the webhook has landed. Same
+      // SECURITY DEFINER path as the initial load.
+      let orderRow = null;
+      let polledTickets = [];
+      let orderErr = null;
+      try {
+        const res = await fetchTicketOrderPublic(orderId);
+        orderRow = res.order;
+        polledTickets = res.tickets;
+      } catch (e) {
+        orderErr = e;
+      }
 
       if (orderErr) {
         console.error("Poll error:", orderErr);
@@ -222,11 +233,11 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
       } else if (orderRow) {
         if (orderRow.status === "paid") {
           setOrder(orderRow);
-          await loadEventAndTickets(orderRow);
+          await loadEventAndTickets(orderRow, polledTickets);
           return; // STOP polling
         } else if (orderRow.status === "refunded") {
           setOrder(orderRow);
-          await loadEventAndTickets(orderRow);
+          await loadEventAndTickets(orderRow, polledTickets);
           setPhase("refunded");
           return; // STOP polling
         } else if (orderRow.status === "failed") {
@@ -264,7 +275,7 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
   // ==========================================================================
   // Load event details + tickets once we know the order is paid
   // ==========================================================================
-  async function loadEventAndTickets(orderRow) {
+  async function loadEventAndTickets(orderRow, presetTickets = null) {
     try {
       // Event row — for display
       const { data: eventRow, error: eventErr } = await supabase
@@ -282,13 +293,14 @@ export default function BuyConfirmationView({ venue, BRAND, eventSlug }) {
       // webhook is still processing (race condition), in which case we should
       // re-enter polling. But if order.status is 'paid', the webhook is done,
       // so tickets should always be present here.
-      const { data: ticketRows, error: ticketErr } = await supabase
-        .from("tickets")
-        .select("*")
-        .eq("order_id", orderRow.id)
-        .order("created_at", { ascending: true });
-
-      if (ticketErr) throw ticketErr;
+      // Normally handed in by the caller, which already fetched order +
+      // tickets together. Falls back to its own lookup so this helper stays
+      // safe to call on its own.
+      let ticketRows = presetTickets;
+      if (ticketRows == null) {
+        const res = await fetchTicketOrderPublic(orderRow.id);
+        ticketRows = res.tickets;
+      }
 
       setTickets(ticketRows || []);
 

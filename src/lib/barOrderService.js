@@ -94,6 +94,40 @@ export async function getVenueBySlug(slug) {
 }
 
 /**
+ * A buyer's own ticket order plus its tickets, by order id.
+ *
+ * Goes through a SECURITY DEFINER function rather than reading the tables
+ * directly. `tickets` and `ticket_orders` previously allowed SELECT to
+ * anyone (policy qual `true`), which meant every qr_token and every buyer's
+ * name/email was readable by the public. Access is now gated on knowing the
+ * order's UUID, which only the buyer has.
+ *
+ * Returns { order: null, tickets: [] } when the id doesn't resolve, matching
+ * the not-found handling the confirmation page already had.
+ */
+export async function fetchTicketOrderPublic(orderId) {
+  const { data, error } = await supabase
+    .rpc('get_ticket_order_public', { p_order_id: orderId });
+
+  if (error) throw error;
+  if (!data || data.ok !== true) return { order: null, tickets: [] };
+  return { order: data.order || null, tickets: data.tickets || [] };
+}
+
+/**
+ * Check-in counters for an event. Also a SECURITY DEFINER function, so the
+ * door scanner can show totals without the tickets table being publicly
+ * readable. Returns plain counts — no ticket data.
+ */
+export async function fetchCheckinStats(eventId, venueId) {
+  const { data, error } = await supabase
+    .rpc('get_checkin_stats', { p_event_id: eventId, p_venue_id: venueId });
+
+  if (error) throw error;
+  return { total: data?.total || 0, checkedIn: data?.checked_in || 0 };
+}
+
+/**
  * Owner-only venue settings (PIN + Square credentials).
  *
  * Requires a signed-in owner session — the admin screens use real Supabase

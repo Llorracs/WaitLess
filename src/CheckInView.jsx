@@ -36,6 +36,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   supabase,
   verifyBartenderPin,
+  fetchCheckinStats,
 } from "./lib/barOrderService";
 import { Html5Qrcode } from "html5-qrcode";
 import DemoStepGuide, { advanceDemoStep, resetDemoStep } from "./DemoStepGuide";
@@ -59,6 +60,8 @@ const PRESENTATION_GAP_MS       = 1000;
 const MIN_REPROCESS_MS          = 1200;
 // How often to check the camera is still alive and restart it if not.
 const CAMERA_WATCHDOG_MS        = 3000;
+// How often to re-read the check-in counter, so other doors' scans show up.
+const STATS_POLL_MS             = 8000;
 const MAX_RECENT                = 15;     // recent check-ins shown in side log
 
 // ============================================================================
@@ -131,6 +134,9 @@ export default function CheckInView({ venue, BRAND }) {
   // re-presented while a result is still on screen isn't lost.
   const presentationRef = useRef({ token: null, startedAt: 0 });
   const decodeCountRef = useRef(0);
+  // Set by the stats effect so a local check-in can refresh the counter
+  // immediately instead of waiting for the next poll.
+  const refreshStatsRef = useRef(null);
   // The last token we actually ran a check-in for.
   const lastProcessedRef = useRef({ token: null, at: 0 });
   // Bumped by the watchdog to force the camera to rebuild.
@@ -214,31 +220,34 @@ export default function CheckInView({ venue, BRAND }) {
     let cancelled = false;
 
     async function refreshStats() {
-      // Total = all non-refunded tickets for this event
-      // Checked in = subset where status = 'checked_in'
-      const { count: totalCount } = await supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", selectedEvent.id)
-        .neq("status", "refunded");
-
-      const { count: checkedInCount } = await supabase
-        .from("tickets")
-        .select("id", { count: "exact", head: true })
-        .eq("event_id", selectedEvent.id)
-        .eq("status", "checked_in");
-
-      if (cancelled) return;
-      setStats({
-        total: totalCount || 0,
-        checkedIn: checkedInCount || 0,
-      });
+      // Counts come from a SECURITY DEFINER function so the tickets table
+      // doesn't need to be publicly readable — reading it directly used to
+      // require a policy that exposed every qr_token to the internet.
+      try {
+        const next = await fetchCheckinStats(selectedEvent.id, venue.id);
+        if (cancelled) return;
+        setStats(next);
+      } catch (e) {
+        console.error("Failed to refresh check-in stats:", e);
+      }
     }
 
     refreshStats();
+    // Let the scan handler refresh the counter the instant this device
+    // checks someone in, rather than waiting for the next poll.
+    refreshStatsRef.current = refreshStats;
 
-    // Realtime subscription — any ticket status change in this event triggers
-    // a stats refresh. Multi-device safe.
+    // Polling is the dependable path. Supabase Realtime only delivers rows
+    // the subscriber is allowed to SELECT, so once the tickets table stops
+    // being publicly readable the subscription below goes quiet — silently.
+    // A frozen counter mid-event is exactly the kind of failure nobody
+    // notices until it matters, so we don't rely on it.
+    const pollId = setInterval(() => {
+      if (!cancelled) refreshStats();
+    }, STATS_POLL_MS);
+
+    // Kept as a bonus: when it does work (staff sessions), it makes other
+    // devices update near-instantly. Harmless when it doesn't.
     const channel = supabase
       .channel(`tickets-checkin-${selectedEvent.id}`)
       .on(
@@ -255,9 +264,11 @@ export default function CheckInView({ venue, BRAND }) {
 
     return () => {
       cancelled = true;
+      clearInterval(pollId);
+      refreshStatsRef.current = null;
       try { supabase.removeChannel(channel); } catch {}
     };
-  }, [selectedEvent]);
+  }, [selectedEvent, venue.id]);
 
   // ==========================================================================
   // QR SCANNER LIFECYCLE
@@ -526,6 +537,9 @@ export default function CheckInView({ venue, BRAND }) {
         // scanner track, not the guest's — the guest is on another device
         // entirely and localStorage doesn't cross devices.
         if (venue.slug === "demo") advanceDemoStep("scanner", 2);
+        // Bump the counter now — this device shouldn't wait on the poll to
+        // see a check-in it just performed.
+        refreshStatsRef.current?.();
         setFeedback({
           kind: "success",
           text: "CHECKED IN",

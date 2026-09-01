@@ -26,7 +26,7 @@ import AnalyticsView from "./AnalyticsView";
 import BillingView from "./BillingView";
 
 // Hardcode your admin email — only this email can access master admin
-const MASTER_ADMIN_EMAIL = "atimelssconcept@gmail.com";
+const MASTER_ADMIN_EMAIL = "cloudcompositions@gmail.com";
 
 // ============================================
 // CATEGORY HEADER — inline-editable with reorder/delete controls
@@ -730,7 +730,7 @@ export default function MasterAdmin() {
   // Check session
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
+      if (session?.user?.email?.toLowerCase() === MASTER_ADMIN_EMAIL.toLowerCase()) {
         setUser(session.user);
       }
       setAuthLoading(false);
@@ -811,6 +811,11 @@ export default function MasterAdmin() {
     setAuthError(null);
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) { setAuthError(error.message); return; }
+    if (data.user?.email?.toLowerCase() !== MASTER_ADMIN_EMAIL.toLowerCase()) {
+      await supabase.auth.signOut();
+      setAuthError("Not authorized.");
+      return;
+    }
     setUser(data.user);
   };
 

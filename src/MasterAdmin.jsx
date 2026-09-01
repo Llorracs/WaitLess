@@ -24,6 +24,8 @@ import { supabase } from "./lib/barOrderService";
 import QRGenerator from "./QRGenerator";
 import AnalyticsView from "./AnalyticsView";
 import BillingView from "./BillingView";
+import EventsListView from "./EventsListView";
+import EventEditorView from "./EventEditorView";
 
 // Hardcode your admin email — only this email can access master admin
 const MASTER_ADMIN_EMAIL = "cloudcompositions@gmail.com";
@@ -710,6 +712,39 @@ function MasterVenueSettings({ venue, setManagedVenue, onBack }) {
   );
 }
 
+// ============================================
+// EVENTS TAB (master) — mirrors AdminView's list/editor toggle
+// ============================================
+function MasterEventsTab({ venue, BRAND }) {
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [listRefreshKey, setListRefreshKey] = useState(0);
+  const handleCreate = () => setEditingEventId("new");
+  const handleEdit = (eventId) => setEditingEventId(eventId);
+  const handleClose = () => {
+    setEditingEventId(null);
+    setListRefreshKey((k) => k + 1);
+  };
+  if (editingEventId !== null) {
+    return (
+      <EventEditorView
+        venue={venue}
+        BRAND={BRAND}
+        eventId={editingEventId === "new" ? null : editingEventId}
+        onClose={handleClose}
+      />
+    );
+  }
+  return (
+    <EventsListView
+      key={listRefreshKey}
+      venue={venue}
+      BRAND={BRAND}
+      onCreateEvent={handleCreate}
+      onEditEvent={handleEdit}
+    />
+  );
+}
+
 export default function MasterAdmin() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -879,6 +914,7 @@ export default function MasterAdmin() {
               { key: "analytics", label: "Analytics" },
               { key: "menu", label: "Menu" },
               { key: "settings", label: "Settings" },
+              { key: "events", label: "Events" },
               { key: "qr", label: "QR Code" },
             ].map((tab) => (
               <button key={tab.key} onClick={() => setManageTab(tab.key)} style={{
@@ -893,6 +929,7 @@ export default function MasterAdmin() {
           {manageTab === "analytics" && <AnalyticsView venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
           {manageTab === "menu" && <MasterMenuBuilder venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
           {manageTab === "settings" && <MasterVenueSettings venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
+          {manageTab === "events" && <MasterEventsTab venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
           {manageTab === "qr" && <QRGenerator venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} embedded={true} />}
         </div>
       ) : (

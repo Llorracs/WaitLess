@@ -23,6 +23,7 @@ const TIME_RANGES = [
 export default function AnalyticsView({ venue, BRAND }) {
   const [range, setRange] = useState("7d");
   const [orders, setOrders] = useState([]);
+  const [ticketOrders, setTicketOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,14 +45,23 @@ export default function AnalyticsView({ venue, BRAND }) {
       startDate.setDate(startDate.getDate() - selectedRange.days);
     }
 
-    const { data, error } = await supabase
-      .from("bar_orders")
-      .select("*")
-      .eq("venue_id", venue.id)
-      .gte("ordered_at", startDate.toISOString())
-      .order("ordered_at", { ascending: false });
+    const [drinkRes, ticketRes] = await Promise.all([
+      supabase
+        .from("bar_orders")
+        .select("*")
+        .eq("venue_id", venue.id)
+        .gte("ordered_at", startDate.toISOString())
+        .order("ordered_at", { ascending: false }),
+      supabase
+        .from("ticket_orders")
+        .select("*")
+        .eq("venue_id", venue.id)
+        .gte("created_at", startDate.toISOString())
+        .order("created_at", { ascending: false }),
+    ]);
 
-    if (!error) setOrders(data || []);
+    if (!drinkRes.error) setOrders(drinkRes.data || []);
+    if (!ticketRes.error) setTicketOrders(ticketRes.data || []);
     setLoading(false);
   }
 
@@ -64,6 +74,16 @@ export default function AnalyticsView({ venue, BRAND }) {
   const totalRevenueCents = completedOrders.reduce((sum, o) => sum + (o.total_cents || 0), 0);
   const totalFeeCents = completedOrders.reduce((sum, o) => sum + (o.fee_cents || 0), 0);
   const subtotalCents = completedOrders.reduce((sum, o) => sum + (o.subtotal_cents || 0), 0);
+
+  // Ticket sales — 'paid' and 'refunded' both count as sales; refunds net out
+  const soldTicketOrders = ticketOrders.filter((t) => ["paid", "refunded"].includes(t.status));
+  const ticketGrossCents = soldTicketOrders.reduce((sum, t) => sum + (t.total_cents || 0), 0);
+  const ticketRefundCents = soldTicketOrders.reduce((sum, t) => sum + (t.refund_amount_cents || 0), 0);
+  const ticketNetCents = ticketGrossCents - ticketRefundCents;
+  const ticketOrderCount = soldTicketOrders.length;
+
+  // Drinks + tickets
+  const combinedRevenueCents = totalRevenueCents + ticketNetCents;
 
   // Average times
   const makeTimes = completedOrders
@@ -144,6 +164,18 @@ export default function AnalyticsView({ venue, BRAND }) {
               value={`$${(totalFeeCents / 100).toFixed(2)}`}
               sub={`${venue.service_fee_percent}% of $${(subtotalCents / 100).toFixed(2)}`}
               color="#d4a843"
+            />
+            <KPICard
+              label="TICKET SALES (NET)"
+              value={`$${(ticketNetCents / 100).toFixed(2)}`}
+              sub={`${ticketOrderCount} ticket orders`}
+              color="#e67e22"
+            />
+            <KPICard
+              label="TOTAL REVENUE (ALL)"
+              value={`$${(combinedRevenueCents / 100).toFixed(2)}`}
+              sub="Drinks + tickets"
+              color="#1abc9c"
             />
             <KPICard
               label="AVG MAKE TIME"

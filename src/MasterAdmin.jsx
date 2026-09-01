@@ -715,6 +715,30 @@ function MasterVenueSettings({ venue, setManagedVenue, onBack }) {
 // ============================================
 // EVENTS TAB (master) — mirrors AdminView's list/editor toggle
 // ============================================
+// EventsListView/EventEditorView read the full venue palette (white, gray,
+// dimText, cardBg, accentMuted, primaryGlow), not just primary/accent. Mirrors
+// getBrand() in App.jsx — kept local because App.jsx imports this file.
+function masterBrand(venue) {
+  const colors = venue?.brand_colors || {};
+  const primary = colors.primary || "#1E4D8C";
+  const accent = colors.accent || "#d4a843";
+  return {
+    black: colors.background || "#0a0a0a",
+    darkGray: "#141414",
+    cardBg: "#1a1a1a",
+    primary,
+    primaryGlow: primary + "40",
+    accent,
+    accentMuted: accent + "4d",
+    white: "#f5f5f5",
+    gray: "#888",
+    dimText: "#666",
+    success: "#2ecc71",
+    warning: "#f39c12",
+    danger: "#e74c3c",
+  };
+}
+
 function MasterEventsTab({ venue, BRAND }) {
   const [editingEventId, setEditingEventId] = useState(null);
   const [listRefreshKey, setListRefreshKey] = useState(0);
@@ -929,7 +953,7 @@ export default function MasterAdmin() {
           {manageTab === "analytics" && <AnalyticsView venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
           {manageTab === "menu" && <MasterMenuBuilder venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
           {manageTab === "settings" && <MasterVenueSettings venue={managedVenue} setManagedVenue={setManagedVenue} onBack={() => setManageTab("analytics")} />}
-          {manageTab === "events" && <MasterEventsTab venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} />}
+          {manageTab === "events" && <MasterEventsTab venue={managedVenue} BRAND={masterBrand(managedVenue)} />}
           {manageTab === "qr" && <QRGenerator venue={managedVenue} BRAND={{ primary: managedVenue.brand_colors?.primary || "#1E4D8C", accent: managedVenue.brand_colors?.accent || "#d4a843" }} embedded={true} />}
         </div>
       ) : (
